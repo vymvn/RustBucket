@@ -1,7 +1,6 @@
 use crate::config::RbServerConfig;
 
-use log;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
@@ -23,33 +22,56 @@ impl RbServer {
         let addr = format!("{}:{}", self.config.host, self.config.port);
         let listener = TcpListener::bind(addr).unwrap();
 
-        println!(
-            "RustBucket server started at {}:{}",
-            self.config.host, self.config.port
-        );
+        log::info!("Listening on {}:{}", self.config.host, self.config.port);
 
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
-                    //self.connections.push(stream);
+                    self.connections.push(stream.try_clone().unwrap());
                     thread::spawn(move || {
                         Self::handle_client(stream);
                     });
                 }
                 Err(e) => {
-                    println!("Error: {}", e);
+                    log::error!("Error: {}", e);
                 }
             }
         }
     }
 
     fn handle_client(mut stream: TcpStream) {
-        stream
-            .write_all("hello vro".as_bytes())
-            .expect("Couldn't send hello :(");
+        let peer_addr = stream.peer_addr().unwrap();
+        log::info!("New connection from: {}", peer_addr);
 
+        let mut buffer = [0; 1024];
+
+        // Read from the client and echo back the data
         loop {
-            // input-output loop
+            match stream.read(&mut buffer) {
+                Ok(0) => {
+                    log::info!("Connection closed by client: {}", peer_addr);
+                    break;
+                }
+                Ok(n) => {
+                    log::info!("Received {} bytes from {}", n, peer_addr);
+
+                    if let Err(e) = stream.write_all(&buffer[0..n]) {
+                        log::error!("Failed to write to socket: {}", e);
+                        break;
+                    }
+
+                    if let Err(e) = stream.flush() {
+                        log::error!("Failed to flush socket: {}", e);
+                        break;
+                    }
+
+                    log::info!("Echoed back {} bytes to {}", n, peer_addr);
+                }
+                Err(e) => {
+                    log::error!("Error reading from socket: {}", e);
+                    break;
+                }
+            }
         }
     }
 }

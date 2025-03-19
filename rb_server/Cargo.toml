@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 log = "0.4.26"
+simple_logger = "5.0.0"
