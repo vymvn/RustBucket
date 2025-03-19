@@ -6,6 +6,10 @@ pub struct RbServerConfig {
 
 impl RbServerConfig {
     pub fn new(host: String, port: u16, verbose: bool) -> RbServerConfig {
-        RbServerConfig { host, port, verbose }
+        RbServerConfig {
+            host,
+            port,
+            verbose,
+        }
     }
 }
