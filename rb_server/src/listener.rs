@@ -40,7 +40,7 @@ impl Listener {
         log::info!("Starting listener {} on {}:{}", self.name, host, port);
 
         // Start server in a separate task
-        actix_web::rt::spawn(async move {
+        tokio::spawn(async move {
             let server = HttpServer::new(move || {
                 App::new()
                     .app_data(web::Data::new(data.clone()))

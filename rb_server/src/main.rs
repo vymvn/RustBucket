@@ -11,7 +11,7 @@ async fn main() {
     // Initialize the logger
     simple_logger::SimpleLogger::new().env().init().unwrap();
 
-    // Create server and listeners
+    // Create server
     let conf = config::RbServerConfig::new("localhost".to_string(), 6666, false);
     let mut c2 = server::RbServer::new(conf);
 
