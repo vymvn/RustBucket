@@ -2,12 +2,16 @@ use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 //use rand::distr::Alphanumeric;
 //use rand::Rng;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use tokio::sync::oneshot;
 
 pub struct Listener {
     pub name: String,
     pub host: String,
     pub port: u16,
     pub running: bool,
+    shutdown_tx: Option<oneshot::Sender<()>>, // Used to signal shutdown
+    handle: Option<thread::JoinHandle<()>>,   // Thread handle for the server
 }
 
 impl Listener {
@@ -19,50 +23,85 @@ impl Listener {
             host,
             port,
             running: false,
+            shutdown_tx: None,
+            handle: None,
         }
     }
 
-    pub async fn start(&mut self) -> std::io::Result<()> {
-        if self.running {
-            log::warn!("Listener {} is already running", self.name);
-            return Ok(());
-        }
+    pub fn start(&mut self, address: &str) {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let address = address.to_string();
 
-        let listener_data = Arc::new(Mutex::new(ListenerData {
-            name: self.name.clone(),
-            connections: Vec::new(),
-        }));
+        let handle = thread::spawn(move || {
+            let system = actix_web::rt::System::new();
 
-        let data = listener_data.clone();
-        let host = self.host.clone();
-        let port = self.port;
+            let server = HttpServer::new(|| App::new().route("/", web::get().to(index)))
+                .bind(&address)
+                .expect("Failed to bind server")
+                .run();
 
-        log::info!("Starting listener {} on {}:{}", self.name, host, port);
+            let server_handle = server.handle();
+            let shutdown_future = async move {
+                shutdown_rx.await.ok(); // Wait for shutdown signal
+                println!("Shutting down server...");
+                server_handle.stop(true).await;
+            };
 
-        // Start server in a separate task
-        tokio::spawn(async move {
-            let server = HttpServer::new(move || {
-                App::new()
-                    .app_data(web::Data::new(data.clone()))
-                    .route("/", web::get().to(index))
-                    .route("/beacon", web::post().to(beacon_handler))
-                    .route("/tasks/{agent_name}", web::get().to(get_tasks))
-            })
-            .bind(format!("{}:{}", host, port))
-            .unwrap_or_else(|e| {
-                log::error!("Failed to bind server: {}", e);
-                panic!("Server binding error: {}", e);
-            })
-            .run();
-
-            if let Err(e) = server.await {
-                log::error!("Server error: {}", e);
-            }
+            system.block_on(async {
+                tokio::spawn(shutdown_future);
+                server.await.expect("Server failed");
+            });
         });
 
-        self.running = true;
-        Ok(())
+        self.shutdown_tx = Some(shutdown_tx);
+        self.handle = Some(handle);
     }
+
+    //pub async fn start(&mut self) -> std::io::Result<()> {
+    //    if self.running {
+    //        log::warn!("Listener {} is already running", self.name);
+    //        return Ok(());
+    //    }
+    //
+    //    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    //
+    //    let listener_data = Arc::new(Mutex::new(ListenerData {
+    //        name: self.name.clone(),
+    //        connections: Vec::new(),
+    //    }));
+    //
+    //    let data = listener_data.clone();
+    //    let host = self.host.clone();
+    //    let port = self.port;
+    //
+    //    log::info!("Starting listener {} on {}:{}", self.name, host, port);
+    //
+    //    let handle = thread::spawn(move || {
+    //        let server = HttpServer::new(|| {
+    //            App::new()
+    //                .app_data(web::Data::new(data.clone()))
+    //                .route("/", web::get().to(index))
+    //                .route("/beacon", web::post().to(beacon_handler))
+    //                .route("/tasks/{agent_name}", web::get().to(get_tasks))
+    //        });
+    //
+    //        let server_handle = server.run();
+    //
+    //        let shutdown_future = async {
+    //            shutdown_rx.await.ok(); // Wait for shutdown signal
+    //            println!("Shutting down server...");
+    //            server_handle.stop(true);
+    //        };
+    //
+    //        actix_web::rt::System::new().block_on(shutdown_future);
+    //    });
+    //
+    //    self.shutdown_tx = Some(shutdown_tx);
+    //    self.handle = Some(handle);
+    //
+    //    self.running = true;
+    //    Ok(())
+    //}
 
     pub fn stop(&mut self) {
         if !self.running {
@@ -70,8 +109,15 @@ impl Listener {
             return;
         }
 
+        if let Some(shutdown_tx) = &self.shutdown_tx {
+            let _ = shutdown_tx.send(()); // Send shutdown signal
+        }
+
+        if let Some(handle) = self.handle {
+            let _ = handle.join(); // Wait for the thread to finish
+        }
+
         log::info!("Stopping listener {}", self.name);
-        // In a real implementation, you would need a way to signal the server to shut down
         self.running = false;
     }
 
