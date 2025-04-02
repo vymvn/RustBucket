@@ -17,7 +17,6 @@ async fn main() {
 
     // Start C2 server
     c2.start();
-    log::info!("C2 server started on port 6666");
 
     // Wait for Ctrl+C
     match signal::ctrl_c().await {
@@ -30,7 +29,6 @@ async fn main() {
     }
 
     // Stop C2 server
-    log::info!("Stopping C2 server");
     c2.stop();
 
     log::info!("All services stopped successfully");
