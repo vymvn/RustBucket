@@ -230,7 +230,7 @@ struct TaskInfo {
 }
 
 //fn gen_name() -> String {
-//    let name: String = rand::thread_rng()
+//let name: String = rand::thread_rng()
 //        .sample_iter(&Alphanumeric)
 //        .take(8)
 //        .map(char::from)
