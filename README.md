@@ -5,9 +5,9 @@ RustBucket
 
 ## rb_server
 
-- [] Implement a real listener with start and stop methods.
-- [] Implement a better command system.
-- [] Some task system
+- [x] Implement a real listener with start and stop methods.
+- [ ] Implement a better command system.
+- [ ] Some task system
 
 ## rb_client
 
