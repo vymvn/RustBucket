@@ -3,10 +3,9 @@ mod config;
 mod listener;
 mod server;
 
-use std::sync::Arc;
 use tokio::signal;
 
-#[actix_web::main]
+#[tokio::main]
 async fn main() {
     // Initialize the logger
     simple_logger::SimpleLogger::new().env().init().unwrap();

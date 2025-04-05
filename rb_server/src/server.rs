@@ -1,6 +1,7 @@
 use crate::config::RbServerConfig;
-use crate::listener::Listener;
-use std::io::{BufRead, BufReader, Read, Write};
+use crate::listener::HttpListener;
+use std::io::{BufRead, BufReader, Write};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -24,7 +25,7 @@ impl Client {
 pub struct RbServer {
     config: RbServerConfig,
     clients: Arc<Mutex<Vec<Client>>>,
-    pub listeners: Arc<Mutex<Vec<Listener>>>,
+    pub listeners: Arc<Mutex<Vec<HttpListener>>>,
     running: Arc<AtomicBool>,
     server_thread: Option<thread::JoinHandle<()>>,
 }
@@ -113,7 +114,7 @@ impl RbServer {
         }));
     }
 
-    pub fn stop(&mut self) {
+    pub async fn stop(&mut self) {
         log::info!("Stopping RbServer...");
 
         // Set the running flag to false to signal threads to stop
@@ -130,7 +131,10 @@ impl RbServer {
         // Stop all listeners
         let mut listeners = self.listeners.lock().unwrap();
         for listener in listeners.iter_mut() {
-            listener.stop();
+            listener
+                .stop()
+                .await
+                .unwrap_or_else(|e| panic!("couldn't stop listener {}: {}", listener.name(), e));
         }
         listeners.clear();
 
@@ -148,7 +152,7 @@ impl RbServer {
     async fn parse_and_execute_command(
         command: &str,
         stream: &mut TcpStream,
-        listeners: Arc<Mutex<Vec<Listener>>>,
+        listeners: Arc<Mutex<Vec<HttpListener>>>,
     ) -> Result<bool, std::io::Error> {
         let parts: Vec<&str> = command.trim().split_whitespace().collect();
         if parts.is_empty() {
@@ -202,11 +206,12 @@ impl RbServer {
                 };
 
                 // Create and start the new listener
-                let mut listener = Listener::new("0.0.0.0".to_string(), port, name);
+                let socket = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), port);
+                let mut listener = HttpListener::new(&name, socket);
 
                 match listener.start().await {
                     Ok(_) => {
-                        let listener_name = listener.name.to_string();
+                        let listener_name = listener.name().to_string();
                         let response = format!(
                             "Listener {} started successfully on port {}\n",
                             listener_name, port
@@ -235,13 +240,12 @@ impl RbServer {
                     stream.write_all(b"No active listeners\n")?;
                 } else {
                     stream.write_all(b"Active listeners:\n")?;
-                    for (i, listener) in listeners_lock.iter().enumerate() {
+                    for listener in listeners_lock.iter() {
                         let line = format!(
-                            "{}) ID: {}, Address: {}:{}\n",
-                            i + 1,
-                            listener.name,
-                            "0.0.0.0",     // Assuming this is the binding address
-                            listener.port  // Assuming this field is accessible
+                            "{}, ID: {}, Address: {}\n",
+                            listener.name(),
+                            listener.id(),
+                            listener.addr()
                         );
                         stream.write_all(line.as_bytes())?;
                     }
@@ -256,7 +260,9 @@ impl RbServer {
                 let listener_name = parts[2];
                 let mut listeners_lock = listeners.lock().unwrap();
 
-                let position = listeners_lock.iter().position(|l| l.name == listener_name);
+                let position = listeners_lock
+                    .iter()
+                    .position(|l| l.name() == listener_name);
                 match position {
                     Some(pos) => {
                         // Remove and stop the listener
@@ -286,7 +292,7 @@ impl RbServer {
         addr: String,
         running: Arc<AtomicBool>,
         clients: Arc<Mutex<Vec<Client>>>,
-        listeners: Arc<Mutex<Vec<Listener>>>,
+        listeners: Arc<Mutex<Vec<HttpListener>>>,
     ) {
         log::info!("Handling client: {}", addr);
 

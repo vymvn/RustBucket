@@ -1,286 +1,161 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-//use rand::distr::Alphanumeric;
-//use rand::Rng;
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::net::SocketAddr;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+use uuid::Uuid;
 
-pub struct Listener {
-    pub name: String,
-    pub host: String,
-    pub port: u16,
-    pub running: bool,
-    shutdown_tx: Option<oneshot::Sender<()>>, // Used to signal shutdown
-    handle: Option<thread::JoinHandle<()>>,   // Thread handle for the server
+pub struct HttpListener {
+    name: String,
+    id: Uuid,
+    addr: SocketAddr,
+    running: Arc<AtomicBool>,
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    handle: Option<JoinHandle<()>>,
 }
 
-impl Listener {
-    pub fn new(host: String, port: u16, name: String) -> Listener {
-        //let name: String = gen_name();
-        log::info!("Generated new listener with name: {}", name);
-        Listener {
-            name,
-            host,
-            port,
-            running: false,
+impl HttpListener {
+    pub fn new(name: &str, addr: SocketAddr) -> Self {
+        HttpListener {
+            name: name.to_string(),
+            id: Uuid::new_v4(),
+            addr,
+            running: Arc::new(AtomicBool::new(false)),
             shutdown_tx: None,
             handle: None,
         }
     }
 
-    pub fn start(&mut self, address: &str) {
-        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-        let address = address.to_string();
-
-        let handle = thread::spawn(move || {
-            let system = actix_web::rt::System::new();
-
-            let server = HttpServer::new(|| App::new().route("/", web::get().to(index)))
-                .bind(&address)
-                .expect("Failed to bind server")
-                .run();
-
-            let server_handle = server.handle();
-            let shutdown_future = async move {
-                shutdown_rx.await.ok(); // Wait for shutdown signal
-                println!("Shutting down server...");
-                server_handle.stop(true).await;
-            };
-
-            system.block_on(async {
-                tokio::spawn(shutdown_future);
-                server.await.expect("Server failed");
-            });
-        });
-
-        self.shutdown_tx = Some(shutdown_tx);
-        self.handle = Some(handle);
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
     }
 
-    //pub async fn start(&mut self) -> std::io::Result<()> {
-    //    if self.running {
-    //        log::warn!("Listener {} is already running", self.name);
-    //        return Ok(());
-    //    }
-    //
-    //    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-    //
-    //    let listener_data = Arc::new(Mutex::new(ListenerData {
-    //        name: self.name.clone(),
-    //        connections: Vec::new(),
-    //    }));
-    //
-    //    let data = listener_data.clone();
-    //    let host = self.host.clone();
-    //    let port = self.port;
-    //
-    //    log::info!("Starting listener {} on {}:{}", self.name, host, port);
-    //
-    //    let handle = thread::spawn(move || {
-    //        let server = HttpServer::new(|| {
-    //            App::new()
-    //                .app_data(web::Data::new(data.clone()))
-    //                .route("/", web::get().to(index))
-    //                .route("/beacon", web::post().to(beacon_handler))
-    //                .route("/tasks/{agent_name}", web::get().to(get_tasks))
-    //        });
-    //
-    //        let server_handle = server.run();
-    //
-    //        let shutdown_future = async {
-    //            shutdown_rx.await.ok(); // Wait for shutdown signal
-    //            println!("Shutting down server...");
-    //            server_handle.stop(true);
-    //        };
-    //
-    //        actix_web::rt::System::new().block_on(shutdown_future);
-    //    });
-    //
-    //    self.shutdown_tx = Some(shutdown_tx);
-    //    self.handle = Some(handle);
-    //
-    //    self.running = true;
-    //    Ok(())
-    //}
-
-    pub fn stop(&mut self) {
-        if !self.running {
-            log::warn!("Listener {} is not running", self.name);
-            return;
-        }
-
-        if let Some(shutdown_tx) = &self.shutdown_tx {
-            let _ = shutdown_tx.send(()); // Send shutdown signal
-        }
-
-        if let Some(handle) = self.handle {
-            let _ = handle.join(); // Wait for the thread to finish
-        }
-
-        log::info!("Stopping listener {}", self.name);
-        self.running = false;
-    }
-
-    pub fn get_name(&self) -> &str {
+    pub fn name(&self) -> &str {
         &self.name
     }
-}
 
-// Data structure to track connected agents/beacons
-struct ListenerData {
-    name: String,
-    connections: Vec<AgentConnection>,
-}
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
 
-struct AgentConnection {
-    agent_name: String,
-    last_seen: std::time::SystemTime,
-    tasks: Vec<Task>,
-}
-
-struct Task {
-    name: String,
-    command: String,
-    status: TaskStatus,
-    result: Option<String>,
-}
-
-enum TaskStatus {
-    Pending,
-    InProgress,
-    Completed,
-    Failed,
-}
-
-// Route handlers
-async fn index() -> impl Responder {
-    log::info!("Hit index");
-    HttpResponse::Ok().body("Server running")
-}
-
-async fn beacon_handler(
-    data: web::Data<Arc<Mutex<ListenerData>>>,
-    payload: web::Json<BeaconPayload>,
-) -> impl Responder {
-    let mut data = data.lock().unwrap();
-
-    // Find existing connection or create new one
-    let agent_conn = match data
-        .connections
-        .iter_mut()
-        .find(|c| c.agent_name == payload.agent_name)
-    {
-        Some(conn) => {
-            log::info!("Existing agent {} checked in", payload.agent_name);
-            conn.last_seen = std::time::SystemTime::now();
-            conn
+    pub async fn start(&mut self) -> Result<(), String> {
+        // Don't start if already running
+        if self.running.load(Ordering::SeqCst) {
+            return Err("Listener is already running".to_string());
         }
-        None => {
-            log::info!("New agent connection: {}", payload.agent_name);
-            let new_conn = AgentConnection {
-                agent_name: payload.agent_name.clone(),
-                last_seen: std::time::SystemTime::now(),
-                tasks: Vec::new(),
-            };
-            data.connections.push(new_conn);
-            data.connections.last_mut().unwrap()
-        }
-    };
 
-    // Process task results if any
-    if let Some(results) = &payload.results {
-        for result in results {
-            if let Some(task) = agent_conn
-                .tasks
-                .iter_mut()
-                .find(|t| t.name == result.task_name)
-            {
-                task.status = TaskStatus::Completed;
-                task.result = Some(result.output.clone());
-                log::info!(
-                    "Task {} completed for agent {}",
-                    task.name,
-                    agent_conn.agent_name
-                );
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        self.shutdown_tx = Some(shutdown_tx);
+
+        let running = self.running.clone();
+        running.store(true, Ordering::SeqCst);
+
+        let server_addr = self.addr;
+        let listener_name = self.name.clone();
+        let listener_id = self.id;
+
+        // Spawn Actix Web server in a separate task
+        let handle = tokio::spawn(async move {
+            // Create shared data for route handlers
+            let listener_data = web::Data::new(ListenerData {
+                name: listener_name.clone(),
+                id: listener_id,
+            });
+
+            // Start server in a separate task
+            let server_task = tokio::spawn(async move {
+                // Define route handlers
+                async fn index(data: web::Data<ListenerData>) -> impl Responder {
+                    HttpResponse::Ok()
+                        .body(format!("RustBucket Listener: {} ({})", data.name, data.id))
+                }
+
+                async fn command_handler(
+                    command: web::Json<serde_json::Value>,
+                    data: web::Data<ListenerData>,
+                ) -> impl Responder {
+                    log::info!("Listener {} received command: {:?}", data.name, command);
+                    HttpResponse::Ok().json(serde_json::json!({
+                        "status": "received",
+                        "message": "Command processed",
+                        "listener": data.name,
+                        "listener_id": data.id
+                    }))
+                }
+
+                let server = HttpServer::new(move || {
+                    App::new()
+                        .app_data(listener_data.clone())
+                        .route("/", web::get().to(index))
+                        .route("/command", web::post().to(command_handler))
+                    // Add more routes as needed
+                })
+                .bind(server_addr)
+                .expect("Failed to bind server to address");
+
+                // println!(
+                //     "HTTP listener '{}' ({}) started on {}",
+                //     listener_data.name, listener_data.id, server_addr
+                // );
+
+                // Run the server
+                if let Err(e) = server.run().await {
+                    eprintln!("Server error: {}", e);
+                }
+            });
+
+            // Wait for shutdown signal
+            let _ = shutdown_rx.await;
+            log::info!("Shutdown signal received for listener '{}'", listener_name);
+
+            // Abort the server task
+            server_task.abort();
+
+            // Clean up
+            running.store(false, Ordering::SeqCst);
+            log::info!(
+                "HTTP listener '{}' ({}) stopped",
+                listener_name,
+                listener_id
+            );
+        });
+
+        self.handle = Some(handle);
+        Ok(())
+    }
+
+    pub async fn stop(&mut self) -> Result<(), String> {
+        if !self.running.load(Ordering::SeqCst) {
+            return Err("Listener is not running".to_string());
+        }
+
+        // Send shutdown signal
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+
+        // Wait for the task to complete
+        if let Some(handle) = self.handle.take() {
+            match handle.await {
+                Ok(_) => {}
+                Err(e) => return Err(format!("Error joining task: {}", e)),
             }
         }
+
+        self.running.store(false, Ordering::SeqCst);
+        Ok(())
     }
 
-    // Return a simple response
-    HttpResponse::Ok().json(web::Json(BeaconResponse {
-        listener_name: data.name.clone(),
-        message: "Beacon received".to_string(),
-    }))
-}
-
-async fn get_tasks(
-    data: web::Data<Arc<Mutex<ListenerData>>>,
-    path: web::Path<String>,
-) -> impl Responder {
-    let agent_name = path.into_inner();
-    let data = data.lock().unwrap();
-
-    if let Some(conn) = data.connections.iter().find(|c| c.agent_name == agent_name) {
-        // Filter for pending tasks only
-        let pending_tasks: Vec<&Task> = conn
-            .tasks
-            .iter()
-            .filter(|t| matches!(t.status, TaskStatus::Pending))
-            .collect();
-
-        HttpResponse::Ok().json(web::Json(TaskResponse {
-            tasks: pending_tasks
-                .iter()
-                .map(|t| TaskInfo {
-                    name: t.name.clone(),
-                    command: t.command.clone(),
-                })
-                .collect(),
-        }))
-    } else {
-        HttpResponse::NotFound().body(format!("Agent {} not found", agent_name))
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
     }
 }
 
-// Data structures for JSON serialization/deserialization
-#[derive(serde::Deserialize)]
-struct BeaconPayload {
-    agent_name: String,
-    hostname: Option<String>,
-    username: Option<String>,
-    os_info: Option<String>,
-    results: Option<Vec<TaskResult>>,
-}
-
-#[derive(serde::Deserialize)]
-struct TaskResult {
-    task_name: String,
-    output: String,
-}
-
-#[derive(serde::Serialize)]
-struct BeaconResponse {
-    listener_name: String,
-    message: String,
-}
-
-#[derive(serde::Serialize)]
-struct TaskResponse {
-    tasks: Vec<TaskInfo>,
-}
-
-#[derive(serde::Serialize)]
-struct TaskInfo {
+// Shared data structure for route handlers
+struct ListenerData {
     name: String,
-    command: String,
+    id: Uuid,
 }
-
-//fn gen_name() -> String {
-//let name: String = rand::thread_rng()
-//        .sample_iter(&Alphanumeric)
-//        .take(8)
-//        .map(char::from)
-//        .collect();
-//
-//    name
-//}
