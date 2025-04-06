@@ -29,7 +29,8 @@ pub trait Context {}
 pub trait Command {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
-    fn execute(&self, args: Vec<String>, context: &mut dyn Context) -> CommandResult;
+    // fn execute(&self, args: Vec<String>, context: &mut dyn Context) -> CommandResult;
+    fn execute(&self, args: Vec<String>) -> CommandResult;
 
     fn help(&self) -> String {
         format!("{} - {}", self.name(), self.description())
