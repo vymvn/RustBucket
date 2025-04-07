@@ -40,7 +40,7 @@ impl RbServer {
     pub fn new(config: RbServerConfig) -> RbServer {
         RbServer {
             config,
-            clients: Arc::new(Mutex::new(Vec::new())),
+            // clients: Arc::new(Mutex::new(Vec::new())),
             listeners: Arc::new(Mutex::new(Vec::new())),
             running: Arc::new(AtomicBool::new(false)),
             server_thread: None,
