@@ -1,4 +1,5 @@
-use std::net::TcpStream;
+// use std::net::TcpStream;
+use tokio::net::TcpStream;
 
 pub struct Client {
     pub addr: String,
@@ -7,7 +8,8 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(addr: String, stream: TcpStream) -> Client {
+    pub fn new(stream: TcpStream) -> Client {
+        let addr = stream.peer_addr().unwrap().to_string();
         Client { addr, stream }
     }
 }

@@ -1,29 +1,41 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, atomic::AtomicBool};
+use std::time::SystemTime;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-use std::time::SystemTime;
 
+/// Session status enum to track the connection state
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionStatus {
+    Connected,
+    Disconnected,
+    Idle,
+}
 
 /// Represents a connection session with a client
 pub struct Session {
     id: Uuid,
     target: SocketAddr,
+    created_at: SystemTime,
     last_active: SystemTime,
+    connection_type: String,
+    metadata: HashMap<String, String>,
     status: SessionStatus,
 }
 
 impl Session {
-    pub fn new(client_addr: SocketAddr, connection_type: String) -> Self {
+    pub fn new(target: SocketAddr, connection_type: String) -> Self {
         let now = SystemTime::now();
         Session {
             id: Uuid::new_v4(),
-            client_addr,
+            target,
             created_at: now,
             last_active: now,
-            metadata: std::collections::HashMap::new(),
             connection_type,
+            metadata: HashMap::new(),
+            status: SessionStatus::Connected,
         }
     }
     
@@ -31,8 +43,8 @@ impl Session {
         self.id
     }
     
-    pub fn client_addr(&self) -> SocketAddr {
-        self.client_addr
+    pub fn target_addr(&self) -> SocketAddr {
+        self.target
     }
     
     pub fn created_at(&self) -> SystemTime {
@@ -57,5 +69,13 @@ impl Session {
     
     pub fn connection_type(&self) -> &str {
         &self.connection_type
+    }
+    
+    pub fn status(&self) -> &SessionStatus {
+        &self.status
+    }
+    
+    pub fn set_status(&mut self, status: SessionStatus) {
+        self.status = status;
     }
 }

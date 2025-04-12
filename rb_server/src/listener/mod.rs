@@ -4,8 +4,8 @@ use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-mod http_listener;
 
+use rb::session::Session;
 
 /// Trait defining the common interface for all listener types
 pub trait Listener {

@@ -21,13 +21,13 @@ impl CommandRegistry {
         &self,
         name: &str,
         args: Vec<String>,
-        // context: &mut dyn Context,
+        context: &mut dyn Context,
     ) -> CommandResult {
         match self.commands.get(name) {
             Some(cmd) => {
                 cmd.validate(&args)?;
-                // cmd.execute(args, context)
-                cmd.execute(args)
+                cmd.execute(args, context)
+                // cmd.execute(args)
             }
             None => Err(CommandError::ExecutionFailure(format!(
                 "Command '{}' not found",
