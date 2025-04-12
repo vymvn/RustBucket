@@ -4,6 +4,7 @@ mod config;
 mod context;
 mod handler;
 mod listener;
+mod new_server;
 mod server;
 
 use tokio::signal;
