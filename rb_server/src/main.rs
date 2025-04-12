@@ -1,11 +1,10 @@
 mod agent;
-mod client;
 mod config;
-mod context;
-mod handler;
+// mod context;
+// mod handler;
 mod listener;
 mod new_server;
-mod server;
+// mod server;
 
 use tokio::signal;
 
@@ -16,15 +15,15 @@ async fn main() {
 
     // Create server
     let conf = config::RbServerConfig::new("localhost".to_string(), 6666, false);
-    let mut c2 = server::RbServer::new(conf);
+    let c2 = new_server::RbServer::new(conf);
 
     // Start C2 server
-    c2.start();
+    c2.start().await.expect("mrrp");
 
     // Wait for Ctrl+C
     match signal::ctrl_c().await {
         Ok(()) => {
-            println!("\nReceived Ctrl+C, shutting down gracefully...");
+            log::info!("\nReceived Ctrl+C, shutting down gracefully...");
         }
         Err(err) => {
             eprintln!("Error setting up Ctrl+C handler: {}", err);
@@ -32,7 +31,7 @@ async fn main() {
     }
 
     // Stop C2 server
-    c2.stop();
+    c2.stop().await.expect("meow");
 
     log::info!("All services stopped successfully");
 }
