@@ -6,7 +6,7 @@ pub struct Client {
     pub addr: String,
     pub id: Uuid,
     // username: String, // To be added when authentication is implemented
-    pub stream: Option<TcpStream>,
+    pub tcp: Option<TcpStream>,
 }
 
 impl Client {
@@ -20,7 +20,7 @@ impl Client {
         Client {
             addr,
             id,
-            stream: Some(stream),
+            tcp: Some(stream),
         }
     }
 
@@ -32,8 +32,8 @@ impl Client {
         &self.addr
     }
 
-    pub fn take_stream(&mut self) -> Option<TcpStream> {
-        self.stream.take()
+    pub fn take_tcp(&mut self) -> Option<TcpStream> {
+        self.tcp.take()
     }
 }
 
@@ -42,7 +42,7 @@ impl fmt::Debug for Client {
         f.debug_struct("Client")
             .field("id", &self.id)
             .field("addr", &self.addr)
-            .field("has_stream", &self.stream.is_some())
+            .field("has_tcp", &self.tcp.is_some())
             .finish()
     }
 }
@@ -53,7 +53,7 @@ impl Clone for Client {
         Client {
             addr: self.addr.clone(),
             id: self.id,
-            stream: None,
+            tcp: None,
         }
     }
 }

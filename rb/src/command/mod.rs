@@ -92,7 +92,7 @@ impl Clone for Command {
 }
 
 // Command output data - flexible output format
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub enum CommandOutput {
     Text(String),
     Table {
@@ -105,7 +105,7 @@ pub enum CommandOutput {
 }
 
 // Command error types
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, serde::Serialize)]
 pub enum CommandError {
     #[error("Invalid arguments: {0}")]
     InvalidArguments(String),

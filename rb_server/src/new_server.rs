@@ -1,18 +1,17 @@
 use crate::config::RbServerConfig;
 use crate::listener;
+use futures::{SinkExt, StreamExt};
 use rb::client::Client;
 use rb::session::Session;
-
-use core::str;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
+use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use uuid::Uuid;
 
-use rb::command::{CommandRegistry, CommandResult};
+use rb::command::{CommandOutput, CommandRegistry, CommandResult};
 
 pub struct RbServer {
     config: RbServerConfig,
@@ -72,6 +71,7 @@ impl RbServer {
 
                         let client_list = clients.clone();
                         let session_list = sessions.clone();
+                        let running_clone = running.clone();
                         let command_registry_clone = command_registry.clone();
 
                         tokio::spawn(async move {
@@ -80,6 +80,7 @@ impl RbServer {
                                 client_id,
                                 client_list,
                                 session_list,
+                                running_clone,
                                 command_registry_clone,
                             )
                             .await
@@ -155,47 +156,51 @@ impl RbServer {
         client_id: Uuid,
         clients: Arc<Mutex<Vec<Client>>>,
         sessions: Arc<Mutex<Vec<Session>>>,
+        running: Arc<AtomicBool>,
         command_registry: Arc<CommandRegistry>,
     ) -> io::Result<()> {
-        // Extract the stream from the client
-        let mut stream = match client.take_stream() {
-            Some(stream) => stream,
-            None => {
-                return Err(io::Error::new(io::ErrorKind::Other, "Client has no stream"));
-            }
-        };
+        log::debug!("Handling client: {}", client.addr());
 
-        // Basic read/write loop - customize based on your protocol
-        let mut buffer = [0u8; 1024];
+        // Extract the TCP stream first
+        let mut tcp_stream = client.take_tcp().unwrap();
+        // Then split it to avoid ownership issues
+        let (reader, writer) = tcp_stream.split();
+        let mut stream = FramedRead::new(reader, LinesCodec::new());
+        let mut sink = FramedWrite::new(writer, LinesCodec::new());
 
-        loop {
-            match stream.read(&mut buffer).await {
-                Ok(0) => {
-                    // Connection closed
-                    println!("Client {} disconnected", client.addr());
+        // Send welcome message
+        let _ = sink
+            .send("Welcome to RustBucket Command Console. Type 'help' for available commands.")
+            .await;
+
+        while running.load(Ordering::SeqCst) {
+            while let Some(Ok(msg)) = stream.next().await {
+                let result: CommandResult = command_registry.execute(msg.as_str()).await;
+
+                // Serialize the result
+                let serialized = match result {
+                    Ok(output) => {
+                        // Serialize the output
+                        serde_json::to_string(&output).unwrap_or_else(|e| {
+                            format!("{{\"error\": \"Failed to serialize output: {}\"}}", e)
+                        })
+                    }
+                    Err(err) => {
+                        // Serialize the error
+                        serde_json::to_string(&err).unwrap_or_else(|e| {
+                            format!("{{\"error\": \"Failed to serialize error: {}\"}}", e)
+                        })
+                    }
+                };
+
+                // Send the serialized result to the client
+                if let Err(e) = sink.send(serialized).await {
+                    log::error!("Failed to send response to client: {}", e);
                     break;
                 }
-                Ok(n) => {
-                    // Process the received data - this is where you would
-                    // implement your C2 protocol parsing
-                    println!("Received {} bytes from {}", n, client.addr());
 
-                    // let (cmd, args) =
-                    //     command::CommandParser::parse(str::from_utf8(&buffer[..n]).unwrap());
-
-                    // log::info!("received cmd: {:?} with args {:?}", cmd, args);
-                    //
-
-                    let result: CommandResult = command_registry
-                        .execute(str::from_utf8(&buffer[..n]).unwrap())
-                        .await;
-
-                    print!("cmd result: {:?}", result);
-                }
-                Err(e) => {
-                    eprintln!("Error reading from socket: {}", e);
-                    break;
-                }
+                // Log the command execution
+                log::debug!("Executed command: {}", msg);
             }
         }
 
