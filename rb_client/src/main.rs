@@ -334,7 +334,9 @@ fn main() -> io::Result<()> {
             }
         };
         
-        let server_name = rustls_pki_types::ServerName::try_from(host.as_str())
+        // Convert hostname to static string to avoid lifetime issues
+        let host_str = host.to_string();
+        let server_name = rustls_pki_types::ServerName::try_from(host_str.as_str())
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid DNS name"))?;
 
         // Create TLS connection
