@@ -131,7 +131,7 @@ impl RbServer {
     async fn start_mtls_server(&self, addr: &str) -> io::Result<()> {
         // Generate PKI
         let test_pki = Arc::new(TestPki::new());
-        
+
         // Write the certificates and keys to disk
         test_pki.write_to_disk(
             &self.config.mtls.ca_path,
@@ -164,22 +164,22 @@ impl RbServer {
                 match listener.accept().await {
                     Ok((mut stream, addr)) => {
                         log::info!("New TLS connection attempt from: {}", addr);
-                        
+
                         let mut acceptor = Acceptor::default();
                         let test_pki = test_pki.clone();
                         let crl_path = crl_path.clone();
-                        
+
                         // Process the TLS handshake in a separate task
                         let client_list = clients.clone();
                         let session_list = sessions.clone();
                         let running_clone = running.clone();
                         let command_registry_clone = command_registry.clone();
-                        
+
                         tokio::spawn(async move {
                             // Read TLS packets until we've consumed a full client hello
                             let accepted = loop {
                                 match acceptor.read_tls(&mut stream).await {
-                                    Ok(_) => {},
+                                    Ok(_) => {}
                                     Err(e) => {
                                         log::error!("Error reading TLS hello: {}", e);
                                         return;
@@ -213,7 +213,7 @@ impl RbServer {
 
                             // TLS connection established, use it to create a client
                             log::info!("TLS connection established with: {}", addr);
-                            
+
                             let client = Client::new(stream);
                             let client_id = client.id();
 
