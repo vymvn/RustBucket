@@ -334,12 +334,9 @@ fn main() -> io::Result<()> {
             }
         };
         
-        // Create a String::into_boxed_str to extend the lifetime
-        let host_static = host.clone().into_boxed_str().into();
-        
-        // Use DNS name with the static string
+        // Use the host string directly for DNS name creation
         let server_name = rustls_pki_types::ServerName::DnsName(
-            rustls_pki_types::DnsName::try_from(host_static)
+            rustls_pki_types::DnsName::try_from(host.as_str())
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid DNS name"))?
         );
 
