@@ -1,9 +1,10 @@
-use reedline::{DefaultCompleter, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal};
 use nu_ansi_term::Color;
+use rb::command::{CommandError, CommandOutput, CommandResult};
+use reedline::{DefaultCompleter, Prompt, PromptEditMode, PromptHistorySearch, Reedline, Signal};
+use serde_json;
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::net::{TcpStream, SocketAddr};
+use std::net::TcpStream;
 use std::str;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -37,7 +38,10 @@ impl Prompt for RustBucketPrompt {
                 let app = Color::Green.paint("RustBucket> ");
                 Cow::Owned(format!("{} {}", label, app))
             }
-            PromptContext::Connected { hostname, connected_to } => {
+            PromptContext::Connected {
+                hostname,
+                connected_to,
+            } => {
                 let label = Color::Yellow.paint(format!("[{}]", hostname));
                 let connection = Color::Red.paint(format!("({})", connected_to));
                 let app = Color::Green.paint("RustBucket> ");
@@ -103,9 +107,15 @@ impl TcpClientState {
 
     fn send(&mut self, data: &[u8]) -> io::Result<usize> {
         if let Some(stream) = &mut self.stream {
-            stream.write(data)
+            // Add newline to ensure server recognizes end of command
+            let mut buffer = Vec::from(data);
+            buffer.push(b'\n');
+            stream.write(&buffer)
         } else {
-            Err(io::Error::new(io::ErrorKind::NotConnected, "Not connected to server"))
+            Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "Not connected to server",
+            ))
         }
     }
 
@@ -120,9 +130,15 @@ impl TcpClientState {
                 }
                 Ok(n) => {
                     self.buffer.extend_from_slice(&buf[0..n]);
-                    let result = self.buffer.clone();
-                    self.buffer.clear();
-                    Ok(Some(result))
+
+                    // Look for newline to indicate complete message
+                    if let Some(pos) = self.buffer.iter().position(|&b| b == b'\n') {
+                        let line = self.buffer[..pos].to_vec();
+                        self.buffer = self.buffer[pos + 1..].to_vec();
+                        Ok(Some(line))
+                    } else {
+                        Ok(None) // Incomplete message
+                    }
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
                     // No data available right now
@@ -131,19 +147,127 @@ impl TcpClientState {
                 Err(e) => Err(e),
             }
         } else {
-            Err(io::Error::new(io::ErrorKind::NotConnected, "Not connected to server"))
+            Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "Not connected to server",
+            ))
+        }
+    }
+
+    // Helper function to display CommandOutput in a formatted way
+    fn display_output(&self, json_data: &[u8]) {
+        // Try to parse as CommandOutput first
+        match serde_json::from_slice::<CommandOutput>(json_data) {
+            Ok(output) => {
+                // Format output based on type
+                match output {
+                    CommandOutput::Text(text) => {
+                        println!("{}", text);
+                    }
+                    CommandOutput::Table { headers, rows } => {
+                        // Calculate max width for each column
+                        let mut column_widths = vec![0; headers.len()];
+
+                        // Check header lengths
+                        for (i, header) in headers.iter().enumerate() {
+                            column_widths[i] = header.len();
+                        }
+
+                        // Check row data lengths
+                        for row in &rows {
+                            for (i, cell) in row.iter().enumerate() {
+                                if i < column_widths.len() && cell.len() > column_widths[i] {
+                                    column_widths[i] = cell.len();
+                                }
+                            }
+                        }
+
+                        // Print headers
+                        let header_line = headers
+                            .iter()
+                            .enumerate()
+                            .map(|(i, h)| format!("{:<width$}", h, width = column_widths[i] + 2))
+                            .collect::<Vec<_>>()
+                            .join("|");
+
+                        println!("\n{}", Color::Cyan.paint(header_line));
+
+                        // Print separator
+                        let separator = column_widths
+                            .iter()
+                            .map(|w| "-".repeat(w + 2))
+                            .collect::<Vec<_>>()
+                            .join("+");
+                        println!("{}", separator);
+
+                        // Print rows
+                        for row in rows {
+                            let formatted_row = row
+                                .iter()
+                                .enumerate()
+                                .map(|(i, cell)| {
+                                    if i < column_widths.len() {
+                                        format!("{:<width$}", cell, width = column_widths[i] + 2)
+                                    } else {
+                                        format!("{:<2}", cell)
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                                .join("|");
+
+                            println!("{}", formatted_row);
+                        }
+                    }
+                    CommandOutput::Json(value) => match serde_json::to_string_pretty(&value) {
+                        Ok(pretty) => println!("{}", pretty),
+                        Err(_) => println!("{:?}", value),
+                    },
+                    CommandOutput::Binary(data) => {
+                        println!("Binary data ({} bytes)", data.len());
+                    }
+                    CommandOutput::None => {
+                        println!("Command executed successfully.");
+                    }
+                }
+            }
+            Err(_) => {
+                // Try to parse as error
+                match serde_json::from_slice::<CommandError>(json_data) {
+                    Ok(err) => {
+                        println!("Error: {}", Color::Red.paint(err.to_string()));
+                    }
+                    Err(_) => {
+                        // If all parsing fails, just print as string
+                        match str::from_utf8(json_data) {
+                            Ok(text) => println!("{}", text),
+                            Err(_) => println!("Received non-text data: {:?}", json_data),
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 fn main() {
-    // Extended command list for tab-completion
+    // Command list for tab-completion
     let commands = vec![
-        "use agent", "use server", "exit", "help", "list", "download", "upload",
-        "connect", "disconnect", "send", "recv", "status", "clear",
+        "use agent",
+        "use server",
+        "exit",
+        "help",
+        "list",
+        "download",
+        "upload",
+        "connect",
+        "disconnect",
+        "status",
+        "clear",
     ];
 
-    let completer = Box::new(DefaultCompleter::new(commands.iter().map(|s| s.to_string()).collect()));
+    let completer = Box::new(DefaultCompleter::new(
+        commands.iter().map(|s| s.to_string()).collect(),
+    ));
 
     // Initialize REPL editor
     let mut line_editor = Reedline::create().with_completer(completer);
@@ -161,21 +285,18 @@ fn main() {
     let receiver = thread::spawn(move || {
         loop {
             thread::sleep(Duration::from_millis(100));
-            
+
             let mut client = tcp_client_clone.lock().unwrap();
             if client.is_connected() {
                 match client.receive() {
                     Ok(Some(data)) => {
                         if !data.is_empty() {
-                            match str::from_utf8(&data) {
-                                Ok(text) => println!("\nReceived: {}", text),
-                                Err(_) => {
-                                    println!("\nReceived binary data: {:?}", data);
-                                }
-                            }
+                            println!(); // Add empty line before output
+                            client.display_output(&data);
+                            println!(); // Add empty line after output
                         }
                     }
-                    Ok(None) => {}, // No data available
+                    Ok(None) => {} // No data available
                     Err(e) => {
                         if e.kind() != io::ErrorKind::NotConnected {
                             eprintln!("\nError receiving data: {}", e);
@@ -187,18 +308,18 @@ fn main() {
     });
 
     // Display welcome message
-    println!("RustBucket Terminal v0.2.0");
+    println!("RustBucket CLI");
     println!("Type 'help' for available commands");
 
     loop {
         match line_editor.read_line(&prompt) {
             Ok(Signal::Success(input)) => {
                 let input = input.trim();
-                
+
                 if input.is_empty() {
                     continue;
                 }
-                
+
                 // Parse command and arguments
                 let parts: Vec<&str> = input.splitn(2, ' ').collect();
                 let command = parts[0];
@@ -212,7 +333,10 @@ fn main() {
                     "use" if *args == "agent" => {
                         println!("Switched to agent context.");
                         match prompt.context {
-                            PromptContext::Connected { hostname, connected_to } => {
+                            PromptContext::Connected {
+                                hostname,
+                                connected_to,
+                            } => {
                                 prompt.context = PromptContext::Connected {
                                     hostname: "dev-pc".to_string(),
                                     connected_to,
@@ -228,7 +352,10 @@ fn main() {
                     "use" if *args == "server" => {
                         println!("Switched to server context.");
                         match prompt.context {
-                            PromptContext::Connected { hostname: _, connected_to } => {
+                            PromptContext::Connected {
+                                hostname: _,
+                                connected_to,
+                            } => {
                                 prompt.context = PromptContext::Connected {
                                     hostname: "server".to_string(),
                                     connected_to,
@@ -240,9 +367,13 @@ fn main() {
                         }
                     }
                     "connect" => {
-                        let addr = if args.is_empty() { "localhost:6666" } else { args };
+                        let addr = if args.is_empty() {
+                            "localhost:6666"
+                        } else {
+                            args
+                        };
                         println!("Connecting to {}...", addr);
-                        
+
                         let mut client = tcp_client.lock().unwrap();
                         match client.connect(addr) {
                             Ok(_) => {
@@ -261,7 +392,10 @@ fn main() {
                                             connected_to: addr.to_string(),
                                         };
                                     }
-                                    PromptContext::Connected { hostname, connected_to: _ } => {
+                                    PromptContext::Connected {
+                                        hostname,
+                                        connected_to: _,
+                                    } => {
                                         prompt.context = PromptContext::Connected {
                                             hostname: hostname.clone(),
                                             connected_to: addr.to_string(),
@@ -282,7 +416,10 @@ fn main() {
                                     println!("Disconnected from server");
                                     // Update prompt context to remove connection status
                                     match &prompt.context {
-                                        PromptContext::Connected { hostname, connected_to: _ } => {
+                                        PromptContext::Connected {
+                                            hostname,
+                                            connected_to: _,
+                                        } => {
                                             if hostname == "server" {
                                                 prompt.context = PromptContext::Server;
                                             } else {
@@ -302,31 +439,14 @@ fn main() {
                             println!("Not currently connected to any server");
                         }
                     }
-                    "send" => {
-                        if args.is_empty() {
-                            println!("Usage: send <message>");
-                            continue;
-                        }
-                        
-                        let mut client = tcp_client.lock().unwrap();
-                        if client.is_connected() {
-                            match client.send(args.as_bytes()) {
-                                Ok(n) => {
-                                    println!("Sent {} bytes", n);
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to send data: {}", e);
-                                }
-                            }
-                        } else {
-                            println!("Not connected to any server. Use 'connect' first.");
-                        }
-                    }
                     "status" => {
                         let client = tcp_client.lock().unwrap();
                         if client.is_connected() {
                             match &prompt.context {
-                                PromptContext::Connected { hostname: _, connected_to } => {
+                                PromptContext::Connected {
+                                    hostname: _,
+                                    connected_to,
+                                } => {
                                     println!("Connected to {}", connected_to);
                                 }
                                 _ => {
@@ -341,20 +461,23 @@ fn main() {
                         // Clear screen with ANSI escape code
                         print!("\x1B[2J\x1B[1;1H");
                     }
-                    "help" => {
-                        println!("Available commands:");
-                        println!("  connect [addr]   - Connect to TCP server (default: localhost:6666)");
-                        println!("  disconnect       - Disconnect from server");
-                        println!("  send <message>   - Send data to connected server");
-                        println!("  status           - Show connection status");
-                        println!("  use agent        - Switch to agent context");
-                        println!("  use server       - Switch to server context");
-                        println!("  clear            - Clear screen");
-                        println!("  help             - Display this help message");
-                        println!("  exit             - Exit the application");
-                    }
-                    other => {
-                        println!("Unknown command: {}. Type 'help' for available commands.", other);
+                    _ => {
+                        // For all non-local commands, send to server if connected
+                        let mut client = tcp_client.lock().unwrap();
+                        if client.is_connected() {
+                            match client.send(input.as_bytes()) {
+                                Ok(_) => {
+                                    // Command sent, response will be handled by receiver thread
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to send command: {}", e);
+                                }
+                            }
+                        } else {
+                            println!(
+                                "Not connected to server. Use 'connect' to establish a connection."
+                            );
+                        }
                     }
                 }
             }
@@ -373,7 +496,4 @@ fn main() {
     if client.is_connected() {
         let _ = client.disconnect();
     }
-    
-    // We're intentionally not joining the receiver thread here since we want to exit immediately
-    // In a production app, you might want to use a channel to signal thread termination
 }

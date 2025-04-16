@@ -92,7 +92,7 @@ impl Clone for Command {
 }
 
 // Command output data - flexible output format
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CommandOutput {
     Text(String),
     Table {
@@ -105,7 +105,7 @@ pub enum CommandOutput {
 }
 
 // Command error types
-#[derive(Debug, thiserror::Error, serde::Serialize)]
+#[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum CommandError {
     #[error("Invalid arguments: {0}")]
     InvalidArguments(String),
@@ -265,7 +265,7 @@ impl CommandRegistry {
         let mut session_option = None;
 
         if command.requires_session {
-            println!("havent done this yet");
+            log::debug!("Command requires sessions which are unimplemented for now");
             // if let Some(session_arc) = self.get_active_session() {
             //     let mut session = session_arc
             //         .try_lock()
