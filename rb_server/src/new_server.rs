@@ -16,7 +16,7 @@ use rb::command::{CommandOutput, CommandRegistry, CommandResult};
 pub struct RbServer {
     config: RbServerConfig,
     clients: Arc<Mutex<Vec<Client>>>,
-    listeners: Arc<Mutex<Vec<Box<dyn listener::Listener + Send + Sync>>>>,
+    listeners: Arc<Mutex<Vec<Box<dyn listener::Listener>>>>,
     sessions: Arc<Mutex<Vec<Session>>>,
     running: Arc<AtomicBool>,
     server_task: Mutex<Option<JoinHandle<()>>>,
@@ -48,7 +48,7 @@ impl RbServer {
         // Bind to the address specified in the config
         let addr = format!("{}:{}", self.config.host, self.config.port);
         let listener = TcpListener::bind(&addr).await?;
-        println!("Server listening on {}", addr);
+        log::info!("Server listening on {}", addr);
 
         let running = self.running.clone();
         let clients = self.clients.clone();
@@ -168,10 +168,19 @@ impl RbServer {
         let mut stream = FramedRead::new(reader, LinesCodec::new());
         let mut sink = FramedWrite::new(writer, LinesCodec::new());
 
-        // Send welcome message
-        let _ = sink
-            .send("Welcome to RustBucket Command Console. Type 'help' for available commands.")
-            .await;
+        // Maybe will add this later for the client to have autocomplete features
+        // let commands: Vec<String> = command_registry
+        //     .list()
+        //     .iter()
+        //     .map(|cmd| cmd.name.clone())
+        //     .collect();
+        //
+        // let serialized_cmds = serde_json::to_string(&commands).unwrap();
+        //
+        // // Send the serialized result to the client
+        // if let Err(e) = sink.send(serialized_cmds).await {
+        //     log::error!("Failed to send commands to client: {}", e);
+        // }
 
         while running.load(Ordering::SeqCst) {
             while let Some(Ok(msg)) = stream.next().await {
