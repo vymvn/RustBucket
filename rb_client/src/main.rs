@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 
-use rb::command::{CommandError, CommandOutput};
+use rb::message::{CommandError, CommandOutput};
 
 // Represents the result from server
 #[derive(Debug, Deserialize)]

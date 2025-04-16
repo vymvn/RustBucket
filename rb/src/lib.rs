@@ -5,5 +5,6 @@ pub mod session;
 
 pub use client::Client;
 // pub use command::{Command, CommandError, CommandRegistry, CommandResult};
-pub use message::{CommandRequest, CommandResponse, ResponseStatus};
-pub use session::{Session, SessionStatus};
+// pub use message::CommandRequest;
+// pub use message::{CommandResponse, ResponseStatus};
+// pub use session::{Session, SessionStatus};

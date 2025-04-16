@@ -10,3 +10,5 @@ thiserror = "2.0.12"
 tokio = { version = "1.44.1", features = ["full"]}
 uuid = { version = "1.16.0", features = ["v4", "serde"]}
 log = "0.4.26"
+clap = "4.5.36"
+# rb_server = { path = "../rb_server" }

@@ -7,7 +7,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::client::Client;
-use crate::command::{CommandOutput, CommandRegistry};
+use crate::command::CommandRegistry;
+use crate::message::CommandOutput;
 
 // Session represents an active connection between the C2 operator and an agent/beacon
 pub struct Session {

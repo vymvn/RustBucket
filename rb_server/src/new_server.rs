@@ -2,7 +2,9 @@ use crate::config::RbServerConfig;
 use crate::listener;
 use futures::{SinkExt, StreamExt};
 use rb::client::Client;
+use rb::command::CommandContext;
 use rb::session::Session;
+use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -11,13 +13,15 @@ use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use uuid::Uuid;
 
-use rb::command::{CommandOutput, CommandRegistry, CommandResult};
+use rb::command::CommandRegistry;
+use rb::message::{CommandError, CommandOutput, CommandResult};
 
 pub struct RbServer {
     config: RbServerConfig,
     clients: Arc<Mutex<Vec<Client>>>,
     listeners: Arc<Mutex<Vec<Box<dyn listener::Listener>>>>,
-    sessions: Arc<Mutex<Vec<Session>>>,
+    // sessions: Arc<Mutex<Vec<Session>>>,
+    sessions: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<rb::session::Session>>>>>,
     running: Arc<AtomicBool>,
     server_task: Mutex<Option<JoinHandle<()>>>,
     command_registry: Arc<CommandRegistry>,
@@ -30,7 +34,11 @@ impl RbServer {
             config,
             clients: Arc::new(Mutex::new(Vec::new())),
             listeners: Arc::new(Mutex::new(Vec::new())),
-            sessions: Arc::new(Mutex::new(Vec::new())),
+            // sessions: Arc::new(Mutex::new(Vec::new())),
+            sessions: Arc::new(std::sync::Mutex::new(HashMap::<
+                Uuid,
+                Arc<std::sync::Mutex<rb::session::Session>>,
+            >::new())),
             running: Arc::new(AtomicBool::new(false)),
             server_task: Mutex::new(None),
             command_registry: Arc::new(CommandRegistry::new()),
@@ -155,7 +163,8 @@ impl RbServer {
         mut client: Client,
         client_id: Uuid,
         clients: Arc<Mutex<Vec<Client>>>,
-        sessions: Arc<Mutex<Vec<Session>>>,
+        // sessions: Arc<Mutex<Vec<Session>>>,
+        sessions: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Session>>>>>,
         running: Arc<AtomicBool>,
         command_registry: Arc<CommandRegistry>,
     ) -> io::Result<()> {
@@ -184,7 +193,13 @@ impl RbServer {
 
         while running.load(Ordering::SeqCst) {
             while let Some(Ok(msg)) = stream.next().await {
-                let result: CommandResult = command_registry.execute(msg.as_str()).await;
+                let mut cmd_context = CommandContext {
+                    sessions: sessions.clone(),
+                    command_registry: command_registry.clone(),
+                };
+                let result: CommandResult = command_registry
+                    .execute(&mut cmd_context, msg.as_str())
+                    .await;
 
                 // Serialize the result
                 let serialized = match result {
