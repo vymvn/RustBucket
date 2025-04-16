@@ -1,4 +1,5 @@
 mod agent;
+mod cert_management;
 mod config;
 // mod context;
 // mod handler;

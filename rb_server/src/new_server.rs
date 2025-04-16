@@ -13,6 +13,8 @@ use uuid::Uuid;
 
 use rb::command::{CommandOutput, CommandRegistry, CommandResult};
 
+use crate::cert_management::CertManager;
+
 pub struct RbServer {
     config: RbServerConfig,
     clients: Arc<Mutex<Vec<Client>>>,
@@ -21,6 +23,7 @@ pub struct RbServer {
     running: Arc<AtomicBool>,
     server_task: Mutex<Option<JoinHandle<()>>>,
     command_registry: Arc<CommandRegistry>,
+    cert_manager: Arc<Mutex<Option<CertManager>>>,
 }
 
 impl RbServer {
@@ -34,6 +37,7 @@ impl RbServer {
             running: Arc::new(AtomicBool::new(false)),
             server_task: Mutex::new(None),
             command_registry: Arc::new(CommandRegistry::new()),
+            cert_manager: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -44,6 +48,23 @@ impl RbServer {
         }
 
         self.running.store(true, Ordering::SeqCst);
+        
+        // Initialize certificate manager
+        {
+            let mut cert_manager = self.cert_manager.lock().unwrap();
+            *cert_manager = Some(CertManager::new("./certs"));
+            
+            if let Some(manager) = &mut *cert_manager {
+                manager.generate_certificates().map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Failed to generate certificates: {}", e),
+                    )
+                })?;
+                
+                log::info!("Successfully generated mTLS certificates");
+            }
+        }
 
         // Bind to the address specified in the config
         let addr = format!("{}:{}", self.config.host, self.config.port);
@@ -54,6 +75,7 @@ impl RbServer {
         let clients = self.clients.clone();
         let sessions = self.sessions.clone();
         let command_registry = self.command_registry.clone();
+        let cert_manager = self.cert_manager.clone();
 
         let handle = tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
@@ -158,13 +180,38 @@ impl RbServer {
         sessions: Arc<Mutex<Vec<Session>>>,
         running: Arc<AtomicBool>,
         command_registry: Arc<CommandRegistry>,
+        cert_manager: Arc<Mutex<Option<CertManager>>>,
     ) -> io::Result<()> {
         log::debug!("Handling client: {}", client.addr());
 
         // Extract the TCP stream first
         let mut tcp_stream = client.take_tcp().unwrap();
+        
+        // Get TLS configuration
+        let server_config = if let Some(manager) = &*cert_manager.lock().unwrap() {
+            manager.create_server_config()?
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Certificate manager not initialized",
+            ));
+        };
+        
+        // Accept TLS connection
+        let tls_conn = tokio_rustls::TlsAcceptor::from(server_config)
+            .accept(tcp_stream)
+            .await
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("TLS handshake failed: {}", e),
+                )
+            })?;
+            
+        log::info!("TLS handshake completed with client: {}", client.addr());
+        
         // Then split it to avoid ownership issues
-        let (reader, writer) = tcp_stream.split();
+        let (reader, writer) = tokio::io::split(tls_conn);
         let mut stream = FramedRead::new(reader, LinesCodec::new());
         let mut sink = FramedWrite::new(writer, LinesCodec::new());
 
