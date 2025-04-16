@@ -3,13 +3,24 @@ use super::{Command, CommandError, CommandOutput, CommandRegistry, CommandResult
 use crate::session::{Session, SessionStatus};
 use std::time::{Duration, SystemTime};
 
+// pub fn http_listener(registry: CommandRegistry) -> Command {
+//     Command::new(
+//         "http_listener",
+//         "Start an HTTP(s) listener",
+//         "http_listener <port> [name]",
+//         vec!["http_listener 8888 webshell".to_string()],
+//         false,
+//         move |_session, args| {},
+//     )
+// }
+
 // Create the help command (needs access to the registry to list all commands)
 pub fn help_command(registry: CommandRegistry) -> Command {
     Command::new(
         "help",
         "Display help information for commands",
         "help [command]",
-        vec!["help".to_string(), "help sessions".to_string()],
+        vec!["help".to_string(), "help http_listener".to_string()],
         false, // Does not require a session
         move |_session, args| {
             if args.is_empty() {
