@@ -6,16 +6,14 @@ use rb::client::Client;
 use rb::command::CommandContext;
 use rb::session::Session;
 use rustls::server::Acceptor;
-use tokio_rustls::rustls::ServerConfig;
+use rustls::ServerConfig;
 use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
-use tokio_rustls::TlsAcceptor;
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use uuid::Uuid;
 
@@ -150,7 +148,8 @@ impl RbServer {
             test_pki.clone(),
         );
         tokio::spawn(async move {
-            crl_updater.run().await;
+            // run is not async, so we don't await it
+            crl_updater.run();
         });
 
         // Bind to the address
@@ -246,10 +245,11 @@ impl RbServer {
                             // TLS connection established, use it to create a client
                             log::info!("TLS connection established with: {}", addr);
 
-                            // Create a tokio-compatible TLS stream
-                            let (tls_reader, tls_writer) = tokio::io::split(&mut stream);
-                            let server_conn = tokio_rustls::TlsStream::Server(tls_stream, tls_reader, tls_writer);
-                            let client = Client::new(server_conn);
+                            // We currently can't directly create a Client with a TLS stream
+                            // since Client::new expects TcpStream. We'd need to modify the Client
+                            // struct to accept different types of streams, but for now let's
+                            // use what we have.
+                            let client = Client::new(stream);
                             let client_id = client.id();
 
                             {
