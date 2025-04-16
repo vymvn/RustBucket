@@ -12,6 +12,6 @@ RustBucket
 
 ## rb_client
 
-Just a cli that makes it easier to type command (autocomplete and history) and receive and display responses from server.
-
-
+- [x] Basic cli
+- [ ] Add session interaction prompt
+- [ ] Add some local commands (eg. exit, clear blkah blah)

@@ -222,9 +222,6 @@ fn main() -> io::Result<()> {
         }
     };
 
-    // Set TCP_NODELAY to disable Nagle's algorithm
-    stream.set_nodelay(true)?;
-
     // Create a new Reedline engine
     let mut line_editor = Reedline::create();
     let prompt = RustBucketPrompt;

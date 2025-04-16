@@ -70,29 +70,29 @@ pub fn help_command(registry: CommandRegistry) -> Command {
 // Get all built-in commands
 pub fn get_builtin_commands(registry: CommandRegistry) -> Vec<Command> {
     vec![
-        exit_command(),
+        // exit_command(),
         // sessions_command(registry.clone()),
         // interact_command(registry),
-        info_command(),
+        // info_command(),
         // shell_command(),
         // kill_command(),
     ]
 }
 
 // Exit command - exit the C2 console (not used on sessions)
-fn exit_command() -> Command {
-    Command::new(
-        "exit",
-        "Exit the C2 console",
-        "exit",
-        vec!["exit".to_string()],
-        false, // Does not require a session
-        |_session, _args| {
-            // This would normally signal the console app to exit
-            Ok(CommandOutput::Text("Exiting C2 console...".to_string()))
-        },
-    )
-}
+// fn exit_command() -> Command {
+//     Command::new(
+//         "exit",
+//         "Exit the C2 console",
+//         "exit",
+//         vec!["exit".to_string()],
+//         false, // Does not require a session
+//         |_session, _args| {
+//             // This would normally signal the console app to exit
+//             Ok(CommandOutput::Text("Exiting C2 console...".to_string()))
+//         },
+//     )
+// }
 
 // Sessions command - list all sessions
 // fn sessions_command(registry: CommandRegistry) -> Command {
@@ -203,48 +203,48 @@ fn exit_command() -> Command {
 // }
 
 // Info command - get info about the current session
-fn info_command() -> Command {
-    Command::new(
-        "info",
-        "Display information about the current session",
-        "info",
-        vec!["info".to_string()],
-        true, // Requires a session
-        |session, _args| {
-            let session = session.unwrap(); // Safe because requires_session is true
-
-            let mut info = Vec::new();
-            info.push(("Session ID", session.id.to_string()));
-            info.push(("Name", session.name.clone()));
-            info.push(("Hostname", session.metadata.hostname.clone()));
-            info.push(("Username", session.metadata.username.clone()));
-            info.push((
-                "OS",
-                format!(
-                    "{} {}",
-                    session.metadata.os_type, session.metadata.os_version
-                ),
-            ));
-            info.push(("Internal IP", session.metadata.internal_ip.clone()));
-            info.push(("External IP", session.metadata.external_ip.clone()));
-            info.push(("Agent Version", session.metadata.agent_version.clone()));
-            info.push((
-                "Privilege Level",
-                format!("{:?}", session.metadata.privilege_level),
-            ));
-            info.push(("Established", format_system_time(session.established_at)));
-            info.push(("Last Check-in", format_system_time(session.last_check_in)));
-            info.push(("Status", format!("{:?}", session.status)));
-
-            let mut text = String::new();
-            for (key, value) in info {
-                text.push_str(&format!("{}: {}\n", key, value));
-            }
-
-            Ok(CommandOutput::Text(text))
-        },
-    )
-}
+// fn info_command() -> Command {
+//     Command::new(
+//         "info",
+//         "Display information about the current session",
+//         "info",
+//         vec!["info".to_string()],
+//         true, // Requires a session
+//         |session, _args| {
+//             let session = session.unwrap(); // Safe because requires_session is true
+//
+//             let mut info = Vec::new();
+//             info.push(("Session ID", session.id.to_string()));
+//             info.push(("Name", session.name.clone()));
+//             info.push(("Hostname", session.metadata.hostname.clone()));
+//             info.push(("Username", session.metadata.username.clone()));
+//             info.push((
+//                 "OS",
+//                 format!(
+//                     "{} {}",
+//                     session.metadata.os_type, session.metadata.os_version
+//                 ),
+//             ));
+//             info.push(("Internal IP", session.metadata.internal_ip.clone()));
+//             info.push(("External IP", session.metadata.external_ip.clone()));
+//             info.push(("Agent Version", session.metadata.agent_version.clone()));
+//             info.push((
+//                 "Privilege Level",
+//                 format!("{:?}", session.metadata.privilege_level),
+//             ));
+//             info.push(("Established", format_system_time(session.established_at)));
+//             info.push(("Last Check-in", format_system_time(session.last_check_in)));
+//             info.push(("Status", format!("{:?}", session.status)));
+//
+//             let mut text = String::new();
+//             for (key, value) in info {
+//                 text.push_str(&format!("{}: {}\n", key, value));
+//             }
+//
+//             Ok(CommandOutput::Text(text))
+//         },
+//     )
+// }
 
 // Shell command - execute shell command on agent
 // fn shell_command() -> Command {
