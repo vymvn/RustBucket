@@ -5,20 +5,22 @@ use futures::{SinkExt, StreamExt};
 use rb::client::Client;
 use rb::command::CommandContext;
 use rb::session::Session;
-use rustls::server::{Acceptor, ServerConfig};
+use rustls::server::Acceptor;
+use tokio_rustls::rustls::ServerConfig;
 use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use uuid::Uuid;
 
 use rb::command::CommandRegistry;
-use rb::message::{CommandError, CommandOutput, CommandResult};
+use rb::message::CommandResult;
 
 pub struct RbServer {
     config: RbServerConfig,
@@ -141,13 +143,15 @@ impl RbServer {
             self.config.mtls.crl_update_seconds,
         );
 
-        // Start the CRL updater in a separate thread
+        // Start the CRL updater in a tokio task instead of a standard thread
         let crl_updater = CrlUpdater::new(
             std::time::Duration::from_secs(self.config.mtls.crl_update_seconds),
             self.config.mtls.crl_path.clone(),
             test_pki.clone(),
         );
-        thread::spawn(move || crl_updater.run());
+        tokio::spawn(async move {
+            crl_updater.run().await;
+        });
 
         // Bind to the address
         let listener = TcpListener::bind(addr).await?;
@@ -178,10 +182,23 @@ impl RbServer {
                         tokio::spawn(async move {
                             // Read TLS packets until we've consumed a full client hello
                             let accepted = loop {
-                                match acceptor.read_tls(&mut stream).await {
-                                    Ok(_) => {}
+                                // Use tokio's AsyncReadExt to read into a buffer first
+                                let mut buf = vec![0u8; 8192]; // Reasonable buffer size
+                                match stream.read(&mut buf).await {
+                                    Ok(0) => {
+                                        // Connection closed
+                                        log::error!("Connection closed during TLS handshake");
+                                        return;
+                                    }
+                                    Ok(n) => {
+                                        // Feed the data into the acceptor
+                                        if let Err(e) = acceptor.read_tls(&mut &buf[..n]) {
+                                            log::error!("Error reading TLS hello: {}", e);
+                                            return;
+                                        }
+                                    }
                                     Err(e) => {
-                                        log::error!("Error reading TLS hello: {}", e);
+                                        log::error!("Error reading from socket: {}", e);
                                         return;
                                     }
                                 }
@@ -190,7 +207,15 @@ impl RbServer {
                                     Ok(Some(accepted)) => break accepted,
                                     Ok(None) => continue,
                                     Err((e, mut alert)) => {
-                                        let _ = alert.write_all(&mut stream).await;
+                                        // Write the alert to the stream using AsyncWriteExt
+                                        let mut alert_bytes = Vec::new();
+                                        if let Err(write_err) = alert.write_all(&mut alert_bytes) {
+                                            log::error!("Failed to write alert: {}", write_err);
+                                        }
+                                        // Send alert bytes via tokio's AsyncWriteExt
+                                        if let Err(send_err) = stream.write_all(&alert_bytes).await {
+                                            log::error!("Failed to send alert: {}", send_err);
+                                        }
                                         log::error!("Error accepting connection: {}", e);
                                         return;
                                     }
@@ -199,13 +224,20 @@ impl RbServer {
 
                             // Generate a server config for the accepted connection
                             let config = test_pki.server_config(&crl_path, accepted.client_hello());
-                            let acceptor = TlsAcceptor::from(config);
-
-                            // Complete the TLS handshake
-                            let tls_stream = match accepted.into_connection(config) {
+                            
+                            // Complete the TLS handshake - we need to convert the rustls::ServerConfig to tokio_rustls::ServerConfig
+                            let tls_stream = match accepted.into_connection(config.clone()) {
                                 Ok(conn) => conn,
                                 Err((e, mut alert)) => {
-                                    let _ = alert.write_all(&mut stream).await;
+                                    // Write the alert using standard Write first
+                                    let mut alert_bytes = Vec::new();
+                                    if let Err(write_err) = alert.write_all(&mut alert_bytes) {
+                                        log::error!("Failed to write alert: {}", write_err);
+                                    }
+                                    // Send the alert bytes using tokio's AsyncWriteExt
+                                    if let Err(send_err) = stream.write_all(&alert_bytes).await {
+                                        log::error!("Failed to send alert: {}", send_err);
+                                    }
                                     log::error!("Error completing TLS handshake: {}", e);
                                     return;
                                 }
@@ -214,7 +246,10 @@ impl RbServer {
                             // TLS connection established, use it to create a client
                             log::info!("TLS connection established with: {}", addr);
 
-                            let client = Client::new(stream);
+                            // Create a tokio-compatible TLS stream
+                            let (tls_reader, tls_writer) = tokio::io::split(&mut stream);
+                            let server_conn = tokio_rustls::TlsStream::Server(tls_stream, tls_reader, tls_writer);
+                            let client = Client::new(server_conn);
                             let client_id = client.id();
 
                             {
@@ -262,9 +297,9 @@ impl RbServer {
         if let Some(handle) = self.server_task.lock().unwrap().take() {
             // It's generally a good idea to have a timeout here
             match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
-                Ok(_) => println!("Server shutdown completed"),
+                Ok(_) => log::info!("Server shutdown completed"),
                 Err(_) => {
-                    println!("Server shutdown timed out");
+                    log::error!("Server shutdown timed out");
                     // You might want to abort the task or take additional actions
                 }
             }
