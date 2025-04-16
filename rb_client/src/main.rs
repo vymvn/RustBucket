@@ -334,9 +334,12 @@ fn main() -> io::Result<()> {
             }
         };
         
-        // Use DNS name directly instead of converting from string
+        // Create a String::into_boxed_str to extend the lifetime
+        let host_static = host.clone().into_boxed_str().into();
+        
+        // Use DNS name with the static string
         let server_name = rustls_pki_types::ServerName::DnsName(
-            rustls_pki_types::DnsName::try_from(host.as_str())
+            rustls_pki_types::DnsName::try_from(host_static)
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid DNS name"))?
         );
 
