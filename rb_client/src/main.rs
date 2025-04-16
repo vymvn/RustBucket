@@ -226,11 +226,6 @@ fn main() -> io::Result<()> {
         )
         .get_matches();
 
-    // Get server address from command line arguments
-    let host = matches.get_one::<String>("host").unwrap();
-    let port = matches.get_one::<String>("port").unwrap();
-    let server_address = format!("{}:{}", host, port);
-
     // Get connection details from command line arguments
     let host = matches.get_one::<String>("host").unwrap();
     let port = matches.get_one::<String>("port").unwrap();
@@ -238,9 +233,10 @@ fn main() -> io::Result<()> {
     let use_mtls = matches.get_flag("mtls");
 
     // Connection type will be either plain TCP or mTLS
-    enum ConnectionType<'a> {
+    enum ConnectionType {
         Plain(TcpStream),
-        Mtls(Stream<'a, ClientConnection, TcpStream>),
+        // Box everything so we have ownership and stable memory locations
+        Mtls(Box<ClientConnection>, Box<TcpStream>),
     }
 
     // Connect to the server based on the connection type
@@ -343,9 +339,9 @@ fn main() -> io::Result<()> {
         let client = ClientConnection::new(config, server_name)
             .map_err(|e| io::Error::new(io::ErrorKind::ConnectionAborted, e))?;
         
-        let mut client = client;
-        let mut tcp_stream = tcp_stream;
-        let tls_stream = Stream::new(&mut client, &mut tcp_stream);
+        // Box the connection and stream for stable memory locations
+        let boxed_client = Box::new(client);
+        let boxed_stream = Box::new(tcp_stream);
         
         println!(
             "{} {} {}",
@@ -354,7 +350,7 @@ fn main() -> io::Result<()> {
             "(with mTLS)".bright_cyan()
         );
         
-        ConnectionType::Mtls(tls_stream)
+        ConnectionType::Mtls(boxed_client, boxed_stream)
     } else {
         // Connect with plain TCP
         match TcpStream::connect(&server_address) {
@@ -412,7 +408,9 @@ fn main() -> io::Result<()> {
                         stream.write_all(command.as_bytes())?;
                         stream.flush()?;
                     }
-                    ConnectionType::Mtls(stream) => {
+                    ConnectionType::Mtls(client, tcp_stream) => {
+                        // Create a temporary Stream for writing
+                        let mut stream = Stream::new(&mut **client, &mut **tcp_stream);
                         stream.write_all(command.as_bytes())?;
                         stream.flush()?;
                     }
@@ -436,15 +434,19 @@ fn main() -> io::Result<()> {
                                 return Err(e);
                             }
                         },
-                        ConnectionType::Mtls(stream) => match stream.read(&mut buffer) {
-                            Ok(0) => {
-                                eprintln!("{}", "Server closed the connection".bright_red());
-                                return Ok(());
-                            }
-                            Ok(n) => n,
-                            Err(e) => {
-                                eprintln!("{}: {}", "Failed to receive data".bright_red(), e);
-                                return Err(e);
+                        ConnectionType::Mtls(client, tcp_stream) => {
+                            // Create a temporary Stream for reading
+                            let mut stream = Stream::new(&mut **client, &mut **tcp_stream);
+                            match stream.read(&mut buffer) {
+                                Ok(0) => {
+                                    eprintln!("{}", "Server closed the connection".bright_red());
+                                    return Ok(());
+                                }
+                                Ok(n) => n,
+                                Err(e) => {
+                                    eprintln!("{}: {}", "Failed to receive data".bright_red(), e);
+                                    return Err(e);
+                                }
                             }
                         }
                     };
@@ -471,9 +473,9 @@ fn main() -> io::Result<()> {
                 println!("\n{}", "Disconnecting from server...".yellow());
                 
                 // Ensure proper shutdown if using TLS
-                if let ConnectionType::Mtls(stream) = &mut connection {
+                if let ConnectionType::Mtls(client, _) = &mut connection {
                     // Send close_notify to properly close the TLS connection
-                    let _ = stream.conn.send_close_notify();
+                    let _ = client.send_close_notify();
                     // We don't need to wait for the peer's close_notify
                     // since we're terminating anyway
                 } 
