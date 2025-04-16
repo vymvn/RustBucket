@@ -1,4 +1,5 @@
 mod agent;
+mod certs;
 mod config;
 // mod context;
 // mod handler;
@@ -13,8 +14,18 @@ async fn main() {
     // Initialize the logger
     simple_logger::SimpleLogger::new().env().init().unwrap();
 
-    // Create server
-    let conf = config::RbServerConfig::new("localhost".to_string(), 6666, false);
+    // Create mTLS configuration
+    let mtls_config = config::MtlsConfig::new(
+        true, // Enable mTLS
+        "ca-cert.pem".to_string(),
+        "client-cert.pem".to_string(),
+        "client-key.pem".to_string(),
+        "crl.der".to_string(),
+        5, // CRL update interval in seconds
+    );
+
+    // Create server with mTLS enabled
+    let conf = config::RbServerConfig::with_mtls("localhost".to_string(), 6666, false, mtls_config);
     let c2 = new_server::RbServer::new(conf);
 
     // Start C2 server
