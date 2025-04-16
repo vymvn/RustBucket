@@ -1,10 +1,9 @@
 use clap::{Arg, Command};
 use colored::*;
-use reedline::{DefaultPrompt, Reedline, Signal};
+use reedline::{Reedline, Signal};
 use reedline::{Prompt, PromptEditMode, PromptHistorySearch};
 use rustls::{ClientConfig, ClientConnection, RootCertStore, Stream};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde::Deserialize;
 use std::borrow::Cow;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Write};
@@ -239,9 +238,9 @@ fn main() -> io::Result<()> {
     let use_mtls = matches.get_flag("mtls");
 
     // Connection type will be either plain TCP or mTLS
-    enum ConnectionType {
+    enum ConnectionType<'a> {
         Plain(TcpStream),
-        Mtls(Stream<ClientConnection, TcpStream>),
+        Mtls(Stream<'a, ClientConnection, TcpStream>),
     }
 
     // Connect to the server based on the connection type
@@ -262,13 +261,12 @@ fn main() -> io::Result<()> {
         });
         
         let mut root_store = RootCertStore::empty();
-        let ca_certs = match rustls_pemfile::certs(&mut ca_reader) {
-            Ok(certs) => certs,
-            Err(e) => {
+        let ca_certs = rustls_pemfile::certs(&mut ca_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
                 eprintln!("{}: {}", "Failed to parse CA certificate".bright_red(), e);
-                return Err(io::Error::new(io::ErrorKind::InvalidData, e));
-            }
-        };
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            })?;
         
         for cert in ca_certs {
             if let Err(e) = root_store.add(cert) {
@@ -286,13 +284,12 @@ fn main() -> io::Result<()> {
                 return Err(e);
             }
         });
-        let client_certs = match rustls_pemfile::certs(&mut cert_reader) {
-            Ok(certs) => certs,
-            Err(e) => {
+        let client_certs = rustls_pemfile::certs(&mut cert_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
                 eprintln!("{}: {}", "Failed to parse client certificate".bright_red(), e);
-                return Err(io::Error::new(io::ErrorKind::InvalidData, e));
-            }
-        };
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            })?;
 
         // Load client key
         println!("Loading client key from {}...", key_path.bright_cyan());
@@ -303,13 +300,12 @@ fn main() -> io::Result<()> {
                 return Err(e);
             }
         });
-        let mut keys = match rustls_pemfile::pkcs8_private_keys(&mut key_reader) {
-            Ok(keys) => keys,
-            Err(e) => {
+        let mut keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
                 eprintln!("{}: {}", "Failed to parse client key".bright_red(), e);
-                return Err(io::Error::new(io::ErrorKind::InvalidData, e));
-            }
-        };
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            })?;
         
         if keys.is_empty() {
             eprintln!("{}", "No private keys found in key file".bright_red());
@@ -347,7 +343,9 @@ fn main() -> io::Result<()> {
         let client = ClientConnection::new(config, server_name)
             .map_err(|e| io::Error::new(io::ErrorKind::ConnectionAborted, e))?;
         
-        let tls_stream = Stream::new(client, tcp_stream);
+        let mut client = client;
+        let mut tcp_stream = tcp_stream;
+        let tls_stream = Stream::new(&mut client, &mut tcp_stream);
         
         println!(
             "{} {} {}",
