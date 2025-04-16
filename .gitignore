@@ -21,4 +21,4 @@ Cargo.lock
 #.idea/
 
 # Cert files
-certs/
+.aider*
