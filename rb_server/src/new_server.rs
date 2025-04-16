@@ -48,12 +48,12 @@ impl RbServer {
         }
 
         self.running.store(true, Ordering::SeqCst);
-        
+
         // Initialize certificate manager
         {
             let mut cert_manager = self.cert_manager.lock().unwrap();
             *cert_manager = Some(CertManager::new("./certs"));
-            
+
             if let Some(manager) = &mut *cert_manager {
                 manager.generate_certificates().map_err(|e| {
                     io::Error::new(
@@ -61,7 +61,7 @@ impl RbServer {
                         format!("Failed to generate certificates: {}", e),
                     )
                 })?;
-                
+
                 log::info!("Successfully generated mTLS certificates");
             }
         }
@@ -186,7 +186,7 @@ impl RbServer {
 
         // Extract the TCP stream first
         let mut tcp_stream = client.take_tcp().unwrap();
-        
+
         // Get TLS configuration
         let server_config = if let Some(manager) = &*cert_manager.lock().unwrap() {
             manager.create_server_config()?
@@ -196,20 +196,17 @@ impl RbServer {
                 "Certificate manager not initialized",
             ));
         };
-        
+
         // Accept TLS connection
         let tls_conn = tokio_rustls::TlsAcceptor::from(server_config)
             .accept(tcp_stream)
             .await
             .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("TLS handshake failed: {}", e),
-                )
+                io::Error::new(io::ErrorKind::Other, format!("TLS handshake failed: {}", e))
             })?;
-            
+
         log::info!("TLS handshake completed with client: {}", client.addr());
-        
+
         // Then split it to avoid ownership issues
         let (reader, writer) = tokio::io::split(tls_conn);
         let mut stream = FramedRead::new(reader, LinesCodec::new());
