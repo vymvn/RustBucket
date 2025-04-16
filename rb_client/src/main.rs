@@ -315,7 +315,7 @@ fn main() -> io::Result<()> {
         // Create TLS configuration
         let config = ClientConfig::builder()
             .with_root_certificates(root_store)
-            .with_client_auth_cert(client_certs, keys.remove(0))
+            .with_client_auth_cert(client_certs, rustls_pki_types::PrivateKeyDer::Pkcs8(keys.remove(0)))
             .map_err(|e| {
                 eprintln!("{}: {}", "Failed to configure TLS client".bright_red(), e);
                 io::Error::new(io::ErrorKind::InvalidData, e)
@@ -473,7 +473,7 @@ fn main() -> io::Result<()> {
                 // Ensure proper shutdown if using TLS
                 if let ConnectionType::Mtls(stream) = &mut connection {
                     // Send close_notify to properly close the TLS connection
-                    let _ = stream.sock.send_close_notify();
+                    let _ = stream.conn.send_close_notify();
                     // We don't need to wait for the peer's close_notify
                     // since we're terminating anyway
                 } 
