@@ -226,11 +226,16 @@ fn main() -> io::Result<()> {
         )
         .get_matches();
 
-    // Get connection details from command line arguments
-    let host = matches.get_one::<String>("host").unwrap();
-    let port = matches.get_one::<String>("port").unwrap();
+    // Extract all needed values from matches to avoid lifetime issues
+    let host = matches.get_one::<String>("host").unwrap().clone();
+    let port = matches.get_one::<String>("port").unwrap().clone();
     let server_address = format!("{}:{}", host, port);
     let use_mtls = matches.get_flag("mtls");
+    
+    // Extract paths early if mTLS is enabled
+    let ca_path = matches.get_one::<String>("ca-path").unwrap().clone();
+    let cert_path = matches.get_one::<String>("cert-path").unwrap().clone();
+    let key_path = matches.get_one::<String>("key-path").unwrap().clone();
 
     // Connection type will be either plain TCP or mTLS
     enum ConnectionType {
@@ -241,10 +246,7 @@ fn main() -> io::Result<()> {
 
     // Connect to the server based on the connection type
     let mut connection = if use_mtls {
-        // Get certificate paths
-        let ca_path = matches.get_one::<String>("ca-path").unwrap();
-        let cert_path = matches.get_one::<String>("cert-path").unwrap();
-        let key_path = matches.get_one::<String>("key-path").unwrap();
+        // Use the paths extracted earlier
 
         // Load CA certificate
         println!("Loading CA certificate from {}...", ca_path.bright_cyan());
