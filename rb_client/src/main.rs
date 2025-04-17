@@ -1,14 +1,16 @@
 use clap::{Arg, Command};
 use colored::*;
-use reedline::{DefaultPrompt, Reedline, Signal};
 use reedline::{Prompt, PromptEditMode, PromptHistorySearch};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use reedline::{Reedline, Signal};
+use rustls::{ClientConfig, ClientConnection, RootCertStore, Stream};
+use serde::Deserialize;
 use std::borrow::Cow;
-use std::io::{self, Read, Write};
+use std::fs::File;
+use std::io::{self, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::sync::Arc;
 
-use rb::command::{CommandError, CommandOutput};
+use rb::message::{CommandError, CommandOutput};
 
 // Represents the result from server
 #[derive(Debug, Deserialize)]
@@ -194,31 +196,215 @@ fn main() -> io::Result<()> {
                 .help("C2 server port")
                 .default_value("6666"),
         )
+        .arg(
+            Arg::new("mtls")
+                .short('m')
+                .long("mtls")
+                .help("Use mutual TLS authentication")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("ca-path")
+                .long("ca-path")
+                .value_name("CA_FILE")
+                .help("Path to CA certificate file")
+                .default_value("ca.pem"),
+        )
+        .arg(
+            Arg::new("cert-path")
+                .long("cert-path")
+                .value_name("CERT_FILE")
+                .help("Path to client certificate file")
+                .default_value("client.pem"),
+        )
+        .arg(
+            Arg::new("key-path")
+                .long("key-path")
+                .value_name("KEY_FILE")
+                .help("Path to client key file")
+                .default_value("client.key"),
+        )
         .get_matches();
 
-    // Get server address from command line arguments
-    let host = matches.get_one::<String>("host").unwrap();
-    let port = matches.get_one::<String>("port").unwrap();
+    // Extract all needed values from matches to avoid lifetime issues
+    let host = matches.get_one::<String>("host").unwrap().clone();
+    let port = matches.get_one::<String>("port").unwrap().clone();
     let server_address = format!("{}:{}", host, port);
+    let use_mtls = matches.get_flag("mtls");
 
-    // Connect to the C2 server
-    let mut stream = match TcpStream::connect(&server_address) {
-        Ok(stream) => {
-            println!(
-                "{} {}",
-                "Connected to RustBucket C2 server at".green(),
-                server_address.bright_green()
-            );
-            stream
+    // Extract paths early if mTLS is enabled
+    let ca_path = matches.get_one::<String>("ca-path").unwrap().clone();
+    let cert_path = matches.get_one::<String>("cert-path").unwrap().clone();
+    let key_path = matches.get_one::<String>("key-path").unwrap().clone();
+
+    // Connection type will be either plain TCP or mTLS
+    enum ConnectionType {
+        Plain(TcpStream),
+        // Box everything so we have ownership and stable memory locations
+        Mtls(Box<ClientConnection>, Box<TcpStream>),
+    }
+
+    // Connect to the server based on the connection type
+    let mut connection = if use_mtls {
+        // Use the paths extracted earlier
+
+        // Load CA certificate
+        println!("Loading CA certificate from {}...", ca_path.bright_cyan());
+        let mut ca_reader = BufReader::new(match File::open(ca_path) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!(
+                    "{}: {}",
+                    "Failed to open CA certificate file".bright_red(),
+                    e
+                );
+                return Err(e);
+            }
+        });
+
+        let mut root_store = RootCertStore::empty();
+        let ca_certs = rustls_pemfile::certs(&mut ca_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                eprintln!("{}: {}", "Failed to parse CA certificate".bright_red(), e);
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            })?;
+
+        for cert in ca_certs {
+            if let Err(e) = root_store.add(cert) {
+                eprintln!(
+                    "{}: {}",
+                    "Failed to add CA certificate to store".bright_red(),
+                    e
+                );
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid CA cert",
+                ));
+            }
         }
-        Err(e) => {
-            eprintln!(
-                "{} {}: {}",
-                "Failed to connect to RustBucket C2 server at".bright_red(),
-                server_address.bright_red(),
-                e
-            );
-            return Err(e);
+
+        // Load client certificate
+        println!(
+            "Loading client certificate from {}...",
+            cert_path.bright_cyan()
+        );
+        let mut cert_reader = BufReader::new(match File::open(cert_path) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!(
+                    "{}: {}",
+                    "Failed to open client certificate file".bright_red(),
+                    e
+                );
+                return Err(e);
+            }
+        });
+        let client_certs = rustls_pemfile::certs(&mut cert_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                eprintln!(
+                    "{}: {}",
+                    "Failed to parse client certificate".bright_red(),
+                    e
+                );
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            })?;
+
+        // Load client key
+        println!("Loading client key from {}...", key_path.bright_cyan());
+        let mut key_reader = BufReader::new(match File::open(key_path) {
+            Ok(file) => file,
+            Err(e) => {
+                eprintln!("{}: {}", "Failed to open client key file".bright_red(), e);
+                return Err(e);
+            }
+        });
+        let mut keys = rustls_pemfile::pkcs8_private_keys(&mut key_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                eprintln!("{}: {}", "Failed to parse client key".bright_red(), e);
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            })?;
+
+        if keys.is_empty() {
+            eprintln!("{}", "No private keys found in key file".bright_red());
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "No private keys found",
+            ));
+        }
+
+        // Create TLS configuration
+        let config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_client_auth_cert(
+                client_certs,
+                rustls_pki_types::PrivateKeyDer::Pkcs8(keys.remove(0)),
+            )
+            .map_err(|e| {
+                eprintln!("{}: {}", "Failed to configure TLS client".bright_red(), e);
+                io::Error::new(io::ErrorKind::InvalidData, e)
+            })?;
+
+        // Connect with TLS
+        let config = Arc::new(config);
+        let tcp_stream = match TcpStream::connect(&server_address) {
+            Ok(stream) => stream,
+            Err(e) => {
+                eprintln!(
+                    "{} {}: {}",
+                    "Failed to connect to RustBucket C2 server at".bright_red(),
+                    server_address.bright_red(),
+                    e
+                );
+                return Err(e);
+            }
+        };
+
+        // Use the host string directly for DNS name creation
+        let server_name = rustls_pki_types::ServerName::DnsName(
+            rustls_pki_types::DnsName::try_from(host)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid DNS name"))?,
+        );
+
+        // Create TLS connection
+        let client = ClientConnection::new(config, server_name)
+            .map_err(|e| io::Error::new(io::ErrorKind::ConnectionAborted, e))?;
+
+        // Box the connection and stream for stable memory locations
+        let boxed_client = Box::new(client);
+        let boxed_stream = Box::new(tcp_stream);
+
+        println!(
+            "{} {} {}",
+            "Connected to RustBucket C2 server at".green(),
+            server_address.bright_green(),
+            "(with mTLS)".bright_cyan()
+        );
+
+        ConnectionType::Mtls(boxed_client, boxed_stream)
+    } else {
+        // Connect with plain TCP
+        match TcpStream::connect(&server_address) {
+            Ok(stream) => {
+                println!(
+                    "{} {} {}",
+                    "Connected to RustBucket C2 server at".green(),
+                    server_address.bright_green(),
+                    "(unencrypted)".yellow()
+                );
+                ConnectionType::Plain(stream)
+            }
+            Err(e) => {
+                eprintln!(
+                    "{} {}: {}",
+                    "Failed to connect to RustBucket C2 server at".bright_red(),
+                    server_address.bright_red(),
+                    e
+                );
+                return Err(e);
+            }
         }
     };
 
@@ -250,8 +436,18 @@ fn main() -> io::Result<()> {
 
                 // Send the command to the server with a newline terminator
                 let command = format!("{}\n", buffer);
-                stream.write_all(command.as_bytes())?;
-                stream.flush()?;
+                match &mut connection {
+                    ConnectionType::Plain(stream) => {
+                        stream.write_all(command.as_bytes())?;
+                        stream.flush()?;
+                    }
+                    ConnectionType::Mtls(client, tcp_stream) => {
+                        // Create a temporary Stream for writing
+                        let mut stream = Stream::new(&mut **client, &mut **tcp_stream);
+                        stream.write_all(command.as_bytes())?;
+                        stream.flush()?;
+                    }
+                }
 
                 // Read the response from the server
                 let mut response_data = Vec::new();
@@ -259,47 +455,64 @@ fn main() -> io::Result<()> {
 
                 // Read in a loop until we have a complete response
                 loop {
-                    match stream.read(&mut buffer) {
-                        Ok(0) => {
-                            eprintln!("{}", "Server closed the connection".bright_red());
-                            return Ok(());
-                        }
-                        Ok(n) => {
-                            response_data.extend_from_slice(&buffer[..n]);
-
-                            // Try to parse what we have so far to see if it's complete
-                            if let Ok(response) =
-                                serde_json::from_slice::<ServerResponse>(&response_data)
-                            {
-                                // We have a complete response
-                                match response {
-                                    ServerResponse::Success(output) => {
-                                        // Print a separator for clarity
-                                        // println!("{}", "─".repeat(50).dimmed());
-                                        display_command_output(output);
-                                        // println!("{}", "─".repeat(50).dimmed());
-                                    }
-                                    ServerResponse::Error(error) => {
-                                        // Print a separator for clarity
-                                        // println!("{}", "─".repeat(50).dimmed());
-                                        display_command_error(error);
-                                        // println!("{}", "─".repeat(50).dimmed());
-                                    }
-                                }
-                                break;
+                    let n = match &mut connection {
+                        ConnectionType::Plain(stream) => match stream.read(&mut buffer) {
+                            Ok(0) => {
+                                eprintln!("{}", "Server closed the connection".bright_red());
+                                return Ok(());
                             }
+                            Ok(n) => n,
+                            Err(e) => {
+                                eprintln!("{}: {}", "Failed to receive data".bright_red(), e);
+                                return Err(e);
+                            }
+                        },
+                        ConnectionType::Mtls(client, tcp_stream) => {
+                            // Create a temporary Stream for reading
+                            let mut stream = Stream::new(&mut **client, &mut **tcp_stream);
+                            match stream.read(&mut buffer) {
+                                Ok(0) => {
+                                    eprintln!("{}", "Server closed the connection".bright_red());
+                                    return Ok(());
+                                }
+                                Ok(n) => n,
+                                Err(e) => {
+                                    eprintln!("{}: {}", "Failed to receive data".bright_red(), e);
+                                    return Err(e);
+                                }
+                            }
+                        }
+                    };
 
-                            // If we couldn't parse yet, continue reading
+                    response_data.extend_from_slice(&buffer[..n]);
+
+                    // Try to parse what we have so far to see if it's complete
+                    if let Ok(response) = serde_json::from_slice::<ServerResponse>(&response_data) {
+                        // We have a complete response
+                        match response {
+                            ServerResponse::Success(output) => {
+                                display_command_output(output);
+                            }
+                            ServerResponse::Error(error) => {
+                                display_command_error(error);
+                            }
                         }
-                        Err(e) => {
-                            eprintln!("{}: {}", "Failed to receive data".bright_red(), e);
-                            return Err(e);
-                        }
+                        break;
                     }
+                    // If we couldn't parse yet, continue reading
                 }
             }
             Signal::CtrlD | Signal::CtrlC => {
                 println!("\n{}", "Disconnecting from server...".yellow());
+
+                // Ensure proper shutdown if using TLS
+                if let ConnectionType::Mtls(client, _) = &mut connection {
+                    // Send close_notify to properly close the TLS connection
+                    let _ = client.send_close_notify();
+                    // We don't need to wait for the peer's close_notify
+                    // since we're terminating anyway
+                }
+
                 break Ok(());
             }
         }

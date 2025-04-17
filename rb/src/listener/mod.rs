@@ -5,10 +5,10 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use rb::session::Session;
+use crate::session::Session;
 
 /// Trait defining the common interface for all listener types
-pub trait Listener {
+pub trait Listener: Send + Sync {
     /// Returns the unique identifier for this listener
     fn id(&self) -> Uuid;
 

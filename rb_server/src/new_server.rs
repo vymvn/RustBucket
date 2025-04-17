@@ -1,23 +1,34 @@
+use crate::certs::{CrlUpdater, TestPki};
 use crate::config::RbServerConfig;
-use crate::listener;
 use futures::{SinkExt, StreamExt};
 use rb::client::Client;
+use rb::command::CommandContext;
+use rb::listener::http_listener::HttpListener;
+use rb::listener::*;
 use rb::session::Session;
+use rustls::server::Acceptor;
+use rustls::ServerConfig;
+use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use uuid::Uuid;
 
-use rb::command::{CommandOutput, CommandRegistry, CommandResult};
+use rb::command::CommandRegistry;
+use rb::message::CommandResult;
 
 pub struct RbServer {
     config: RbServerConfig,
     clients: Arc<Mutex<Vec<Client>>>,
-    listeners: Arc<Mutex<Vec<Box<dyn listener::Listener>>>>,
-    sessions: Arc<Mutex<Vec<Session>>>,
+    // listeners: Arc<Mutex<Vec<Box<dyn Listener>>>>,
+    // listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<dyn Listener>>>>>>,
+    listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
+    // sessions: Arc<Mutex<Vec<Session>>>,
+    sessions: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<rb::session::Session>>>>>,
     running: Arc<AtomicBool>,
     server_task: Mutex<Option<JoinHandle<()>>>,
     command_registry: Arc<CommandRegistry>,
@@ -29,8 +40,12 @@ impl RbServer {
         RbServer {
             config,
             clients: Arc::new(Mutex::new(Vec::new())),
-            listeners: Arc::new(Mutex::new(Vec::new())),
-            sessions: Arc::new(Mutex::new(Vec::new())),
+            listeners: Arc::new(Mutex::new(HashMap::new())),
+            // sessions: Arc::new(Mutex::new(Vec::new())),
+            sessions: Arc::new(std::sync::Mutex::new(HashMap::<
+                Uuid,
+                Arc<std::sync::Mutex<rb::session::Session>>,
+            >::new())),
             running: Arc::new(AtomicBool::new(false)),
             server_task: Mutex::new(None),
             command_registry: Arc::new(CommandRegistry::new()),
@@ -47,19 +62,33 @@ impl RbServer {
 
         // Bind to the address specified in the config
         let addr = format!("{}:{}", self.config.host, self.config.port);
-        let listener = TcpListener::bind(&addr).await?;
-        log::info!("Server listening on {}", addr);
+
+        // Check if mTLS is enabled
+        if self.config.mtls.enabled {
+            self.start_mtls_server(&addr).await?;
+        } else {
+            self.start_plain_server(&addr).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Start a non-TLS server
+    async fn start_plain_server(&self, addr: &str) -> io::Result<()> {
+        let listener = TcpListener::bind(addr).await?;
+        log::info!("Server listening on {} (plain TCP)", addr);
 
         let running = self.running.clone();
         let clients = self.clients.clone();
         let sessions = self.sessions.clone();
         let command_registry = self.command_registry.clone();
+        let listeners = self.listeners.clone();
 
         let handle = tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
                 match listener.accept().await {
                     Ok((socket, addr)) => {
-                        println!("New connection from: {}", addr);
+                        log::info!("New connection from: {}", addr);
 
                         let client = Client::new(socket);
                         let client_id = client.id();
@@ -73,6 +102,7 @@ impl RbServer {
                         let session_list = sessions.clone();
                         let running_clone = running.clone();
                         let command_registry_clone = command_registry.clone();
+                        let listeners_clone = listeners.clone();
 
                         tokio::spawn(async move {
                             if let Err(e) = Self::handle_client(
@@ -80,6 +110,7 @@ impl RbServer {
                                 client_id,
                                 client_list,
                                 session_list,
+                                listeners_clone,
                                 running_clone,
                                 command_registry_clone,
                             )
@@ -91,6 +122,167 @@ impl RbServer {
                     }
                     Err(e) => {
                         eprintln!("Error accepting connection: {}", e);
+                    }
+                }
+            }
+        });
+
+        // Store the server task handle
+        *self.server_task.lock().unwrap() = Some(handle);
+
+        Ok(())
+    }
+
+    /// Start an mTLS server
+    async fn start_mtls_server(&self, addr: &str) -> io::Result<()> {
+        // Generate PKI
+        let test_pki = Arc::new(TestPki::new());
+
+        // Write the certificates and keys to disk
+        test_pki.write_to_disk(
+            &self.config.mtls.ca_path,
+            &self.config.mtls.client_cert_path,
+            &self.config.mtls.client_key_path,
+            &self.config.mtls.crl_path,
+            self.config.mtls.crl_update_seconds,
+        );
+
+        // Start the CRL updater in a tokio task instead of a standard thread
+        let crl_updater = CrlUpdater::new(
+            std::time::Duration::from_secs(self.config.mtls.crl_update_seconds),
+            self.config.mtls.crl_path.clone(),
+            test_pki.clone(),
+        );
+        tokio::spawn(async move {
+            // run is not async, so we don't await it
+            crl_updater.run();
+        });
+
+        // Bind to the address
+        let listener = TcpListener::bind(addr).await?;
+        log::info!("Server listening on {} (mTLS)", addr);
+
+        let running = self.running.clone();
+        let clients = self.clients.clone();
+        let sessions = self.sessions.clone();
+        let command_registry = self.command_registry.clone();
+        let crl_path = self.config.mtls.crl_path.clone();
+        let listeners = self.listeners.clone();
+
+        let handle = tokio::spawn(async move {
+            while running.load(Ordering::SeqCst) {
+                match listener.accept().await {
+                    Ok((mut stream, addr)) => {
+                        log::info!("New TLS connection attempt from: {}", addr);
+
+                        let mut acceptor = Acceptor::default();
+                        let test_pki = test_pki.clone();
+                        let crl_path = crl_path.clone();
+
+                        // Process the TLS handshake in a separate task
+                        let client_list = clients.clone();
+                        let session_list = sessions.clone();
+                        let running_clone = running.clone();
+                        let command_registry_clone = command_registry.clone();
+                        let listeners_clone = listeners.clone();
+
+                        tokio::spawn(async move {
+                            // Read TLS packets until we've consumed a full client hello
+                            let accepted = loop {
+                                // Use tokio's AsyncReadExt to read into a buffer first
+                                let mut buf = vec![0u8; 8192]; // Reasonable buffer size
+                                match stream.read(&mut buf).await {
+                                    Ok(0) => {
+                                        // Connection closed
+                                        log::error!("Connection closed during TLS handshake");
+                                        return;
+                                    }
+                                    Ok(n) => {
+                                        // Feed the data into the acceptor
+                                        if let Err(e) = acceptor.read_tls(&mut &buf[..n]) {
+                                            log::error!("Error reading TLS hello: {}", e);
+                                            return;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::error!("Error reading from socket: {}", e);
+                                        return;
+                                    }
+                                }
+
+                                match acceptor.accept() {
+                                    Ok(Some(accepted)) => break accepted,
+                                    Ok(None) => continue,
+                                    Err((e, mut alert)) => {
+                                        // Write the alert to the stream using AsyncWriteExt
+                                        let mut alert_bytes = Vec::new();
+                                        if let Err(write_err) = alert.write_all(&mut alert_bytes) {
+                                            log::error!("Failed to write alert: {}", write_err);
+                                        }
+                                        // Send alert bytes via tokio's AsyncWriteExt
+                                        if let Err(send_err) = stream.write_all(&alert_bytes).await
+                                        {
+                                            log::error!("Failed to send alert: {}", send_err);
+                                        }
+                                        log::error!("Error accepting connection: {}", e);
+                                        return;
+                                    }
+                                }
+                            };
+
+                            // Generate a server config for the accepted connection
+                            let config = test_pki.server_config(&crl_path, accepted.client_hello());
+
+                            // Complete the TLS handshake - we need to convert the rustls::ServerConfig to tokio_rustls::ServerConfig
+                            let tls_stream = match accepted.into_connection(config.clone()) {
+                                Ok(conn) => conn,
+                                Err((e, mut alert)) => {
+                                    // Write the alert using standard Write first
+                                    let mut alert_bytes = Vec::new();
+                                    if let Err(write_err) = alert.write_all(&mut alert_bytes) {
+                                        log::error!("Failed to write alert: {}", write_err);
+                                    }
+                                    // Send the alert bytes using tokio's AsyncWriteExt
+                                    if let Err(send_err) = stream.write_all(&alert_bytes).await {
+                                        log::error!("Failed to send alert: {}", send_err);
+                                    }
+                                    log::error!("Error completing TLS handshake: {}", e);
+                                    return;
+                                }
+                            };
+
+                            // TLS connection established, use it to create a client
+                            log::info!("TLS connection established with: {}", addr);
+
+                            // We currently can't directly create a Client with a TLS stream
+                            // since Client::new expects TcpStream. We'd need to modify the Client
+                            // struct to accept different types of streams, but for now let's
+                            // use what we have.
+                            let client = Client::new(stream);
+                            let client_id = client.id();
+
+                            {
+                                let mut client_list = client_list.lock().unwrap();
+                                client_list.push(client.clone());
+                            }
+
+                            if let Err(e) = Self::handle_client(
+                                client,
+                                client_id,
+                                client_list,
+                                session_list,
+                                listeners_clone,
+                                running_clone,
+                                command_registry_clone,
+                            )
+                            .await
+                            {
+                                log::error!("Error handling client {}: {}", addr, e);
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        log::error!("Error accepting connection: {}", e);
                     }
                 }
             }
@@ -115,9 +307,9 @@ impl RbServer {
         if let Some(handle) = self.server_task.lock().unwrap().take() {
             // It's generally a good idea to have a timeout here
             match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
-                Ok(_) => println!("Server shutdown completed"),
+                Ok(_) => log::info!("Server shutdown completed"),
                 Err(_) => {
-                    println!("Server shutdown timed out");
+                    log::error!("Server shutdown timed out");
                     // You might want to abort the task or take additional actions
                 }
             }
@@ -135,9 +327,11 @@ impl RbServer {
     }
 
     /// Add a listener to the server
-    pub fn add_listener(&self, listener: Box<dyn listener::Listener + Send + Sync>) {
+    pub fn add_listener(&self, listener: Box<HttpListener>) -> Uuid {
+        let uuid = Uuid::new_v4(); // Generate a new UUID for this listener
         let mut listeners = self.listeners.lock().unwrap();
-        listeners.push(listener);
+        listeners.insert(uuid, Arc::new(Mutex::new(listener)));
+        uuid // Return the UUID so the caller can reference this listener later
     }
 
     /// Get the current number of connected clients
@@ -155,18 +349,29 @@ impl RbServer {
         mut client: Client,
         client_id: Uuid,
         clients: Arc<Mutex<Vec<Client>>>,
-        sessions: Arc<Mutex<Vec<Session>>>,
+        // sessions: Arc<Mutex<Vec<Session>>>,
+        sessions: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Session>>>>>,
+        listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
         running: Arc<AtomicBool>,
         command_registry: Arc<CommandRegistry>,
     ) -> io::Result<()> {
         log::debug!("Handling client: {}", client.addr());
 
         // Extract the TCP stream first
+        log::info!("Before we take the TCP stream");
         let mut tcp_stream = client.take_tcp().unwrap();
+        log::info!("After we take the TCP stream");
+
         // Then split it to avoid ownership issues
         let (reader, writer) = tcp_stream.split();
+        log::info!("After we split the TCP stream");
+
         let mut stream = FramedRead::new(reader, LinesCodec::new());
+        log::debug!("After FramedRead");
+        log::debug!("{:?}", stream);
+
         let mut sink = FramedWrite::new(writer, LinesCodec::new());
+        log::debug!("After FramedWrite");
 
         // Maybe will add this later for the client to have autocomplete features
         // let commands: Vec<String> = command_registry
@@ -182,9 +387,18 @@ impl RbServer {
         //     log::error!("Failed to send commands to client: {}", e);
         // }
 
+        log::info!("Running: {:?}", running);
         while running.load(Ordering::SeqCst) {
             while let Some(Ok(msg)) = stream.next().await {
-                let result: CommandResult = command_registry.execute(msg.as_str()).await;
+                log::info!("Received: {:?}", msg);
+                let mut cmd_context = CommandContext {
+                    sessions: sessions.clone(),
+                    command_registry: command_registry.clone(),
+                    listeners: listeners.clone(),
+                };
+                let result: CommandResult = command_registry
+                    .execute(&mut cmd_context, msg.as_str())
+                    .await;
 
                 // Serialize the result
                 let serialized = match result {
