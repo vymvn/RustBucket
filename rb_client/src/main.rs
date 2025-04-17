@@ -1,7 +1,7 @@
 use clap::{Arg, Command};
 use colored::*;
-use reedline::{Reedline, Signal};
 use reedline::{Prompt, PromptEditMode, PromptHistorySearch};
+use reedline::{Reedline, Signal};
 use rustls::{ClientConfig, ClientConnection, RootCertStore, Stream};
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -231,7 +231,7 @@ fn main() -> io::Result<()> {
     let port = matches.get_one::<String>("port").unwrap().clone();
     let server_address = format!("{}:{}", host, port);
     let use_mtls = matches.get_flag("mtls");
-    
+
     // Extract paths early if mTLS is enabled
     let ca_path = matches.get_one::<String>("ca-path").unwrap().clone();
     let cert_path = matches.get_one::<String>("cert-path").unwrap().clone();
@@ -253,11 +253,15 @@ fn main() -> io::Result<()> {
         let mut ca_reader = BufReader::new(match File::open(ca_path) {
             Ok(file) => file,
             Err(e) => {
-                eprintln!("{}: {}", "Failed to open CA certificate file".bright_red(), e);
+                eprintln!(
+                    "{}: {}",
+                    "Failed to open CA certificate file".bright_red(),
+                    e
+                );
                 return Err(e);
             }
         });
-        
+
         let mut root_store = RootCertStore::empty();
         let ca_certs = rustls_pemfile::certs(&mut ca_reader)
             .collect::<Result<Vec<_>, _>>()
@@ -265,27 +269,45 @@ fn main() -> io::Result<()> {
                 eprintln!("{}: {}", "Failed to parse CA certificate".bright_red(), e);
                 io::Error::new(io::ErrorKind::InvalidData, e)
             })?;
-        
+
         for cert in ca_certs {
             if let Err(e) = root_store.add(cert) {
-                eprintln!("{}: {}", "Failed to add CA certificate to store".bright_red(), e);
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid CA cert"));
+                eprintln!(
+                    "{}: {}",
+                    "Failed to add CA certificate to store".bright_red(),
+                    e
+                );
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Invalid CA cert",
+                ));
             }
         }
 
         // Load client certificate
-        println!("Loading client certificate from {}...", cert_path.bright_cyan());
+        println!(
+            "Loading client certificate from {}...",
+            cert_path.bright_cyan()
+        );
         let mut cert_reader = BufReader::new(match File::open(cert_path) {
             Ok(file) => file,
             Err(e) => {
-                eprintln!("{}: {}", "Failed to open client certificate file".bright_red(), e);
+                eprintln!(
+                    "{}: {}",
+                    "Failed to open client certificate file".bright_red(),
+                    e
+                );
                 return Err(e);
             }
         });
         let client_certs = rustls_pemfile::certs(&mut cert_reader)
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| {
-                eprintln!("{}: {}", "Failed to parse client certificate".bright_red(), e);
+                eprintln!(
+                    "{}: {}",
+                    "Failed to parse client certificate".bright_red(),
+                    e
+                );
                 io::Error::new(io::ErrorKind::InvalidData, e)
             })?;
 
@@ -304,16 +326,22 @@ fn main() -> io::Result<()> {
                 eprintln!("{}: {}", "Failed to parse client key".bright_red(), e);
                 io::Error::new(io::ErrorKind::InvalidData, e)
             })?;
-        
+
         if keys.is_empty() {
             eprintln!("{}", "No private keys found in key file".bright_red());
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "No private keys found"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "No private keys found",
+            ));
         }
 
         // Create TLS configuration
         let config = ClientConfig::builder()
             .with_root_certificates(root_store)
-            .with_client_auth_cert(client_certs, rustls_pki_types::PrivateKeyDer::Pkcs8(keys.remove(0)))
+            .with_client_auth_cert(
+                client_certs,
+                rustls_pki_types::PrivateKeyDer::Pkcs8(keys.remove(0)),
+            )
             .map_err(|e| {
                 eprintln!("{}: {}", "Failed to configure TLS client".bright_red(), e);
                 io::Error::new(io::ErrorKind::InvalidData, e)
@@ -333,28 +361,28 @@ fn main() -> io::Result<()> {
                 return Err(e);
             }
         };
-        
+
         // Use the host string directly for DNS name creation
         let server_name = rustls_pki_types::ServerName::DnsName(
-            rustls_pki_types::DnsName::try_from(host.as_str())
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid DNS name"))?
+            rustls_pki_types::DnsName::try_from(host)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Invalid DNS name"))?,
         );
 
         // Create TLS connection
         let client = ClientConnection::new(config, server_name)
             .map_err(|e| io::Error::new(io::ErrorKind::ConnectionAborted, e))?;
-        
+
         // Box the connection and stream for stable memory locations
         let boxed_client = Box::new(client);
         let boxed_stream = Box::new(tcp_stream);
-        
+
         println!(
             "{} {} {}",
             "Connected to RustBucket C2 server at".green(),
             server_address.bright_green(),
             "(with mTLS)".bright_cyan()
         );
-        
+
         ConnectionType::Mtls(boxed_client, boxed_stream)
     } else {
         // Connect with plain TCP
@@ -455,7 +483,7 @@ fn main() -> io::Result<()> {
                             }
                         }
                     };
-                    
+
                     response_data.extend_from_slice(&buffer[..n]);
 
                     // Try to parse what we have so far to see if it's complete
@@ -476,15 +504,15 @@ fn main() -> io::Result<()> {
             }
             Signal::CtrlD | Signal::CtrlC => {
                 println!("\n{}", "Disconnecting from server...".yellow());
-                
+
                 // Ensure proper shutdown if using TLS
                 if let ConnectionType::Mtls(client, _) = &mut connection {
                     // Send close_notify to properly close the TLS connection
                     let _ = client.send_close_notify();
                     // We don't need to wait for the peer's close_notify
                     // since we're terminating anyway
-                } 
-                
+                }
+
                 break Ok(());
             }
         }
