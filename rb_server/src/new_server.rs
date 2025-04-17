@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use uuid::Uuid;
@@ -212,7 +212,8 @@ impl RbServer {
                                             log::error!("Failed to write alert: {}", write_err);
                                         }
                                         // Send alert bytes via tokio's AsyncWriteExt
-                                        if let Err(send_err) = stream.write_all(&alert_bytes).await {
+                                        if let Err(send_err) = stream.write_all(&alert_bytes).await
+                                        {
                                             log::error!("Failed to send alert: {}", send_err);
                                         }
                                         log::error!("Error accepting connection: {}", e);
@@ -223,7 +224,7 @@ impl RbServer {
 
                             // Generate a server config for the accepted connection
                             let config = test_pki.server_config(&crl_path, accepted.client_hello());
-                            
+
                             // Complete the TLS handshake - we need to convert the rustls::ServerConfig to tokio_rustls::ServerConfig
                             let tls_stream = match accepted.into_connection(config.clone()) {
                                 Ok(conn) => conn,
@@ -345,11 +346,19 @@ impl RbServer {
         log::debug!("Handling client: {}", client.addr());
 
         // Extract the TCP stream first
+        log::info!("Before we take the TCP stream");
         let mut tcp_stream = client.take_tcp().unwrap();
+        log::info!("After we take the TCP stream");
+
         // Then split it to avoid ownership issues
         let (reader, writer) = tcp_stream.split();
+        log::info!("After we split the TCP stream");
+
         let mut stream = FramedRead::new(reader, LinesCodec::new());
+        log::info!("After FramedRead");
+
         let mut sink = FramedWrite::new(writer, LinesCodec::new());
+        log::info!("After FramedWrite");
 
         // Maybe will add this later for the client to have autocomplete features
         // let commands: Vec<String> = command_registry
@@ -365,8 +374,10 @@ impl RbServer {
         //     log::error!("Failed to send commands to client: {}", e);
         // }
 
+        log::info!("Running: {:?}", running);
         while running.load(Ordering::SeqCst) {
             while let Some(Ok(msg)) = stream.next().await {
+                log::info!("Received: {:?}", msg);
                 let mut cmd_context = CommandContext {
                     sessions: sessions.clone(),
                     command_registry: command_registry.clone(),
