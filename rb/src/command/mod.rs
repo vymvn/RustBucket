@@ -1,3 +1,5 @@
+use crate::listener::http_listener::HttpListener;
+use crate::listener::*;
 use crate::message::{CommandError, CommandOutput, CommandResult};
 use crate::session::Session;
 use std::any::Any;
@@ -8,7 +10,6 @@ use std::sync::Mutex;
 use uuid::Uuid;
 
 use clap;
-// use rb_server::listener::*;
 
 mod server_cmds;
 
@@ -37,6 +38,7 @@ pub struct CommandContext {
     pub sessions: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Session>>>>>,
     pub command_registry: Arc<CommandRegistry>,
     // pub listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<dyn Listener>>>>>>,
+    pub listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
 }
 
 // Command Registry that holds both server and implant commands

@@ -1,9 +1,10 @@
 use crate::certs::{CrlUpdater, TestPki};
 use crate::config::RbServerConfig;
-use crate::listener;
 use futures::{SinkExt, StreamExt};
 use rb::client::Client;
 use rb::command::CommandContext;
+use rb::listener::http_listener::HttpListener;
+use rb::listener::*;
 use rb::session::Session;
 use rustls::server::Acceptor;
 use rustls::ServerConfig;
@@ -23,7 +24,9 @@ use rb::message::CommandResult;
 pub struct RbServer {
     config: RbServerConfig,
     clients: Arc<Mutex<Vec<Client>>>,
-    listeners: Arc<Mutex<Vec<Box<dyn listener::Listener>>>>,
+    // listeners: Arc<Mutex<Vec<Box<dyn Listener>>>>,
+    // listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<dyn Listener>>>>>>,
+    listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
     // sessions: Arc<Mutex<Vec<Session>>>,
     sessions: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<rb::session::Session>>>>>,
     running: Arc<AtomicBool>,
@@ -37,7 +40,7 @@ impl RbServer {
         RbServer {
             config,
             clients: Arc::new(Mutex::new(Vec::new())),
-            listeners: Arc::new(Mutex::new(Vec::new())),
+            listeners: Arc::new(Mutex::new(HashMap::new())),
             // sessions: Arc::new(Mutex::new(Vec::new())),
             sessions: Arc::new(std::sync::Mutex::new(HashMap::<
                 Uuid,
@@ -79,6 +82,7 @@ impl RbServer {
         let clients = self.clients.clone();
         let sessions = self.sessions.clone();
         let command_registry = self.command_registry.clone();
+        let listeners = self.listeners.clone();
 
         let handle = tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
@@ -98,6 +102,7 @@ impl RbServer {
                         let session_list = sessions.clone();
                         let running_clone = running.clone();
                         let command_registry_clone = command_registry.clone();
+                        let listeners_clone = listeners.clone();
 
                         tokio::spawn(async move {
                             if let Err(e) = Self::handle_client(
@@ -105,6 +110,7 @@ impl RbServer {
                                 client_id,
                                 client_list,
                                 session_list,
+                                listeners_clone,
                                 running_clone,
                                 command_registry_clone,
                             )
@@ -161,6 +167,7 @@ impl RbServer {
         let sessions = self.sessions.clone();
         let command_registry = self.command_registry.clone();
         let crl_path = self.config.mtls.crl_path.clone();
+        let listeners = self.listeners.clone();
 
         let handle = tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
@@ -177,6 +184,7 @@ impl RbServer {
                         let session_list = sessions.clone();
                         let running_clone = running.clone();
                         let command_registry_clone = command_registry.clone();
+                        let listeners_clone = listeners.clone();
 
                         tokio::spawn(async move {
                             // Read TLS packets until we've consumed a full client hello
@@ -263,6 +271,7 @@ impl RbServer {
                                 client_id,
                                 client_list,
                                 session_list,
+                                listeners_clone,
                                 running_clone,
                                 command_registry_clone,
                             )
@@ -318,9 +327,11 @@ impl RbServer {
     }
 
     /// Add a listener to the server
-    pub fn add_listener(&self, listener: Box<dyn listener::Listener + Send + Sync>) {
+    pub fn add_listener(&self, listener: Box<HttpListener>) -> Uuid {
+        let uuid = Uuid::new_v4(); // Generate a new UUID for this listener
         let mut listeners = self.listeners.lock().unwrap();
-        listeners.push(listener);
+        listeners.insert(uuid, Arc::new(Mutex::new(listener)));
+        uuid // Return the UUID so the caller can reference this listener later
     }
 
     /// Get the current number of connected clients
@@ -340,6 +351,7 @@ impl RbServer {
         clients: Arc<Mutex<Vec<Client>>>,
         // sessions: Arc<Mutex<Vec<Session>>>,
         sessions: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Session>>>>>,
+        listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
         running: Arc<AtomicBool>,
         command_registry: Arc<CommandRegistry>,
     ) -> io::Result<()> {
@@ -355,10 +367,11 @@ impl RbServer {
         log::info!("After we split the TCP stream");
 
         let mut stream = FramedRead::new(reader, LinesCodec::new());
-        log::info!("After FramedRead");
+        log::debug!("After FramedRead");
+        log::debug!("{:?}", stream);
 
         let mut sink = FramedWrite::new(writer, LinesCodec::new());
-        log::info!("After FramedWrite");
+        log::debug!("After FramedWrite");
 
         // Maybe will add this later for the client to have autocomplete features
         // let commands: Vec<String> = command_registry
@@ -381,6 +394,7 @@ impl RbServer {
                 let mut cmd_context = CommandContext {
                     sessions: sessions.clone(),
                     command_registry: command_registry.clone(),
+                    listeners: listeners.clone(),
                 };
                 let result: CommandResult = command_registry
                     .execute(&mut cmd_context, msg.as_str())

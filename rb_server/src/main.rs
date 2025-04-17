@@ -3,7 +3,6 @@ mod certs;
 mod config;
 // mod context;
 // mod handler;
-mod listener;
 mod new_server;
 // mod server;
 
@@ -25,7 +24,8 @@ async fn main() {
     );
 
     // Create server with mTLS enabled
-    let conf = config::RbServerConfig::with_mtls("localhost".to_string(), 6666, false, mtls_config);
+    // let conf = config::RbServerConfig::with_mtls("localhost".to_string(), 6666, false, mtls_config);
+    let conf = config::RbServerConfig::new("localhost".to_string(), 6666, false);
     let c2 = new_server::RbServer::new(conf);
 
     // Start C2 server
