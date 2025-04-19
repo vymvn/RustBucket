@@ -3,7 +3,7 @@ mod certs;
 mod config;
 // mod context;
 // mod handler;
-mod new_server;
+mod server;
 // mod server;
 
 use tokio::signal;
@@ -26,7 +26,7 @@ async fn main() {
     // Create server with mTLS enabled
     // let conf = config::RbServerConfig::with_mtls("localhost".to_string(), 6666, false, mtls_config);
     let conf = config::RbServerConfig::new("localhost".to_string(), 6666, false);
-    let c2 = new_server::RbServer::new(conf);
+    let c2 = server::RbServer::new(conf);
 
     // Start C2 server
     c2.start().await.expect("mrrp");
