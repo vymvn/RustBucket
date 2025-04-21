@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
+use uuid::Uuid;
 
 // #[derive(Debug, Serialize, Deserialize)]
 // pub struct CommandRequest {
@@ -59,4 +61,54 @@ pub enum CommandError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+}
+
+// Beacon data structures
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BeaconInfo {
+    pub id: Uuid,
+    pub hostname: String,
+    pub ip_address: String,
+    pub os_info: String,
+    pub username: String,
+    pub process_id: u32,
+    pub first_seen: SystemTime,
+    pub last_seen: SystemTime,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BeaconCheckin {
+    pub id: Option<Uuid>, // Optional for first registration
+    pub hostname: String,
+    pub ip_address: String,
+    pub os_info: String,
+    pub username: String,
+    pub process_id: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Task {
+    pub id: Uuid,
+    pub beacon_id: Uuid,
+    pub command: String,
+    pub args: Vec<String>,
+    pub created_at: SystemTime,
+    pub status: TaskStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TaskStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskResult {
+    pub task_id: Uuid,
+    pub beacon_id: Uuid,
+    pub output: String,
+    pub status: TaskStatus,
+    pub completed_at: SystemTime,
 }

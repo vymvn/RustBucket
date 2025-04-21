@@ -4,14 +4,11 @@ use futures::{SinkExt, StreamExt};
 use rb::client::Client;
 use rb::command::CommandContext;
 use rb::listener::http_listener::HttpListener;
-use rb::listener::*;
-use rb::session::Session;
 use rustls::server::Acceptor;
-use rustls::ServerConfig;
 use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -20,6 +17,7 @@ use uuid::Uuid;
 
 use rb::command::CommandRegistry;
 use rb::message::CommandResult;
+use rb::session::SessionManager;
 
 pub struct RbServer {
     config: RbServerConfig,
@@ -28,7 +26,8 @@ pub struct RbServer {
     // listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<dyn Listener>>>>>>,
     listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
     // sessions: Arc<Mutex<Vec<Session>>>,
-    sessions: Arc<std::sync::Mutex<HashMap<Uuid, Arc<std::sync::Mutex<rb::session::Session>>>>>,
+    // sessions: Arc<std::sync::RwLock<HashMap<Uuid, Arc<Session>>>>,
+    session_manager: Arc<RwLock<SessionManager>>,
     running: Arc<AtomicBool>,
     server_task: Mutex<Option<JoinHandle<()>>>,
     command_registry: Arc<CommandRegistry>,
@@ -41,11 +40,8 @@ impl RbServer {
             config,
             clients: Arc::new(Mutex::new(Vec::new())),
             listeners: Arc::new(Mutex::new(HashMap::new())),
-            // sessions: Arc::new(Mutex::new(Vec::new())),
-            sessions: Arc::new(std::sync::Mutex::new(HashMap::<
-                Uuid,
-                Arc<std::sync::Mutex<rb::session::Session>>,
-            >::new())),
+            // sessions: Arc::new(std::sync::RwLock::new(HashMap::new())),
+            session_manager: Arc::new(RwLock::new(SessionManager::new())),
             running: Arc::new(AtomicBool::new(false)),
             server_task: Mutex::new(None),
             command_registry: Arc::new(CommandRegistry::new()),
@@ -80,7 +76,8 @@ impl RbServer {
 
         let running = self.running.clone();
         let clients = self.clients.clone();
-        let sessions = self.sessions.clone();
+        // let sessions = self.sessions.clone();
+        let session_manager = self.session_manager.clone();
         let command_registry = self.command_registry.clone();
         let listeners = self.listeners.clone();
 
@@ -99,7 +96,7 @@ impl RbServer {
                         }
 
                         let client_list = clients.clone();
-                        let session_list = sessions.clone();
+                        let session_manager = session_manager.clone();
                         let running_clone = running.clone();
                         let command_registry_clone = command_registry.clone();
                         let listeners_clone = listeners.clone();
@@ -109,7 +106,7 @@ impl RbServer {
                                 client,
                                 client_id,
                                 client_list,
-                                session_list,
+                                session_manager,
                                 listeners_clone,
                                 running_clone,
                                 command_registry_clone,
@@ -164,7 +161,8 @@ impl RbServer {
 
         let running = self.running.clone();
         let clients = self.clients.clone();
-        let sessions = self.sessions.clone();
+        // let sessions = self.sessions.clone();
+        let session_manager = self.session_manager.clone();
         let command_registry = self.command_registry.clone();
         let crl_path = self.config.mtls.crl_path.clone();
         let listeners = self.listeners.clone();
@@ -181,7 +179,8 @@ impl RbServer {
 
                         // Process the TLS handshake in a separate task
                         let client_list = clients.clone();
-                        let session_list = sessions.clone();
+                        // let session_list = sessions.clone();
+                        let session_manager = session_manager.clone();
                         let running_clone = running.clone();
                         let command_registry_clone = command_registry.clone();
                         let listeners_clone = listeners.clone();
@@ -270,7 +269,7 @@ impl RbServer {
                                 client,
                                 client_id,
                                 client_list,
-                                session_list,
+                                session_manager,
                                 listeners_clone,
                                 running_clone,
                                 command_registry_clone,
@@ -320,8 +319,8 @@ impl RbServer {
         clients.clear();
 
         // Clean up any remaining sessions
-        let mut sessions = self.sessions.lock().unwrap();
-        sessions.clear();
+        let session_manager = self.session_manager.write().unwrap();
+        session_manager.kill_all_sessions();
 
         Ok(())
     }
@@ -339,18 +338,14 @@ impl RbServer {
         self.clients.lock().unwrap().len()
     }
 
-    /// Get the current number of active sessions
-    pub fn session_count(&self) -> usize {
-        self.sessions.lock().unwrap().len()
-    }
-
     /// Handle an individual client connection
     async fn handle_client(
         mut client: Client,
         client_id: Uuid,
         clients: Arc<Mutex<Vec<Client>>>,
         // sessions: Arc<Mutex<Vec<Session>>>,
-        sessions: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Session>>>>>,
+        // sessions: Arc<std::sync::RwLock<HashMap<Uuid, Arc<Session>>>>,
+        session_manager: Arc<RwLock<SessionManager>>,
         listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
         running: Arc<AtomicBool>,
         command_registry: Arc<CommandRegistry>,
@@ -392,7 +387,8 @@ impl RbServer {
             while let Some(Ok(msg)) = stream.next().await {
                 log::info!("Received: {:?}", msg);
                 let mut cmd_context = CommandContext {
-                    sessions: sessions.clone(),
+                    session_manager: session_manager.clone(),
+                    // active_session: client.active_session.clone(),
                     command_registry: command_registry.clone(),
                     listeners: listeners.clone(),
                 };

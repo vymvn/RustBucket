@@ -16,10 +16,10 @@ async fn main() {
     // Create mTLS configuration
     let mtls_config = config::MtlsConfig::new(
         true, // Enable mTLS
-        "ca-cert.pem".to_string(),
-        "client-cert.pem".to_string(),
-        "client-key.pem".to_string(),
-        "crl.der".to_string(),
+        "certs/ca-cert.pem".to_string(),
+        "certs/client-cert.pem".to_string(),
+        "certs/client-key.pem".to_string(),
+        "certs/crl.der".to_string(),
         5, // CRL update interval in seconds
     );
 

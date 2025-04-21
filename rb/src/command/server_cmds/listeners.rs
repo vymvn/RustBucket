@@ -1,9 +1,11 @@
+/// Listeners command module
 use crate::command::*;
 use crate::listener::http_listener::HttpListener;
 use crate::message::*;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::runtime::Runtime;
 
+use super::get_arg_matches;
 use clap;
 
 #[derive(Debug)]
@@ -68,16 +70,18 @@ impl RbCommand for ServerListenersCommand {
             );
 
         // Get the arguments part (skip the command name)
-        let args_str = command_line
-            .trim_start()
-            .strip_prefix(self.name())
-            .unwrap_or("")
-            .trim_start();
+        // let args_str = command_line
+        //     .trim_start()
+        //     .strip_prefix(self.name())
+        //     .unwrap_or("")
+        //     .trim_start();
+        //
+        // // Parse the arguments
+        // let matches = cmd.try_get_matches_from(
+        //     std::iter::once(self.name()).chain(args_str.split_whitespace()),
+        // )?;
 
-        // Parse the arguments
-        let matches = cmd.try_get_matches_from(
-            std::iter::once(self.name()).chain(args_str.split_whitespace()),
-        )?;
+        let matches = get_arg_matches(&cmd, command_line)?;
 
         let mut args = ListenerArgs {
             action: String::new(),
@@ -204,6 +208,7 @@ impl RbCommand for ServerListenersCommand {
                                 let mut new_listener = HttpListener::new(
                                     format!("HTTP_{}:{}", bind_address, port).as_str(),
                                     socket_addr,
+                                    context.session_manager.clone(),
                                 );
 
                                 // Get the mutex-protected listeners map

@@ -1,274 +1,420 @@
-// File: rb/src/session.rs
-use std::sync::Arc;
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::client::Client;
-use crate::command::CommandRegistry;
-use crate::message::CommandOutput;
-
-// Session represents an active connection between the C2 operator and an agent/beacon
-pub struct Session {
-    // Unique identifier for this session
-    pub id: Uuid,
-
-    // Descriptive name for the session (can be set by the operator)
-    pub name: String,
-
-    // ID of the client (agent/beacon) associated with this session
-    pub client_id: Uuid,
-
-    // When the session was established
-    pub established_at: SystemTime,
-
-    // When the session last communicated
-    pub last_check_in: SystemTime,
-
-    // Session metadata
-    pub metadata: SessionMetadata,
-
-    // Session state
-    pub status: SessionStatus,
-
-    // Command registry for executing commands
-    command_registry: Arc<CommandRegistry>,
-
-    // Communication channels for sending commands and receiving responses
-    command_tx: mpsc::Sender<String>,
-    response_rx: mpsc::Receiver<String>,
-}
-
-// Metadata about the agent/beacon
-#[derive(Debug, Clone)]
-pub struct SessionMetadata {
-    // Operating system information
-    pub os_type: String,
-    pub os_version: String,
-    pub hostname: String,
-    pub username: String,
-
-    // Agent information
-    pub agent_version: String,
-    pub agent_build: String,
-
-    // Network information
-    pub internal_ip: String,
-    pub external_ip: String,
-
-    // Permissions/privilege level
-    pub privilege_level: PrivilegeLevel,
-
-    // Supported features/capabilities
-    pub capabilities: Vec<String>,
-
-    // Custom fields for any additional info
-    pub custom: std::collections::HashMap<String, String>,
-}
-//
-// Privilege level of the agent
-#[derive(Debug, Clone, PartialEq)]
-pub enum PrivilegeLevel {
-    User,
-    Admin,
-    System,
-    Root,
-    Unknown,
-}
-
-// Status of the session
+/// Status of a session
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionStatus {
     Active,
-    Sleeping,
+    Idle,
     Disconnected,
     Terminated,
 }
-//
-// impl Session {
-//     // Create a new session for a client
-//     pub fn new(
-//         client: &Client,
-//         command_registry: Arc<CommandRegistry>,
-//         metadata: SessionMetadata,
-//     ) -> (Self, mpsc::Sender<String>) {
-//         // Create communication channels
-//         let (cmd_tx, cmd_rx) = mpsc::channel(100);
-//         let (resp_tx, resp_rx) = mpsc::channel(100);
-//
-//         let now = SystemTime::now();
-//
-//         let session = Session {
-//             id: Uuid::new_v4(),
-//             name: format!("{}_{}", metadata.hostname, Uuid::new_v4().as_u128() % 10000),
-//             client_id: client.id,
-//             established_at: now,
-//             last_check_in: now,
-//             metadata,
-//             status: SessionStatus::Active,
-//             command_registry,
-//             command_tx: resp_tx,
-//             response_rx: resp_rx,
-//         };
-//
-//         // Spawn a task to handle the communication with the agent
-//         Self::start_session_handler(cmd_rx, resp_tx.clone(), client.stream.clone());
-//
-//         (session, cmd_tx)
-//     }
-//
-//     // Start the background task that handles communication with the agent
-//     fn start_session_handler(
-//         mut cmd_rx: mpsc::Receiver<String>,
-//         resp_tx: mpsc::Sender<String>,
-//         mut stream_opt: Option<TcpStream>,
-//     ) {
-//         tokio::spawn(async move {
-//             let mut stream = match stream_opt.take() {
-//                 Some(s) => s,
-//                 None => return, // No stream available
-//             };
-//
-//             // Simple protocol: send commands and receive responses
-//             // A real implementation would use a more robust protocol
-//             while let Some(command) = cmd_rx.recv().await {
-//                 // Send command to agent
-//                 if let Err(e) = stream.write_all(command.as_bytes()).await {
-//                     eprintln!("Failed to send command to agent: {}", e);
-//                     break;
-//                 }
-//
-//                 // Read response
-//                 let mut buffer = [0u8; 4096];
-//                 match stream.read(&mut buffer).await {
-//                     Ok(0) => {
-//                         // Connection closed
-//                         break;
-//                     }
-//                     Ok(n) => {
-//                         // Forward response
-//                         let response = String::from_utf8_lossy(&buffer[..n]).to_string();
-//                         if let Err(e) = resp_tx.send(response).await {
-//                             eprintln!("Failed to forward agent response: {}", e);
-//                             break;
-//                         }
-//                     }
-//                     Err(e) => {
-//                         eprintln!("Error reading from agent: {}", e);
-//                         break;
-//                     }
-//                 }
-//             }
-//
-//             // Session handler terminated
-//             eprintln!("Session handler terminated");
-//         });
-//     }
-//
-//     // Execute a command on this session
-//     pub async fn execute_command(&mut self, command_str: &str) -> Result<CommandOutput, String> {
-//         // Update last check-in time
-//         self.last_check_in = SystemTime::now();
-//
-//         // Check if session is active
-//         if self.status != SessionStatus::Active {
-//             return Err(format!(
-//                 "Session is not active (current status: {:?})",
-//                 self.status
-//             ));
-//         }
-//
-//         // Send command to agent
-//         if let Err(e) = self.command_tx.send(command_str.to_string()).await {
-//             return Err(format!("Failed to send command: {}", e));
-//         }
-//
-//         // Wait for response with timeout
-//         match tokio::time::timeout(Duration::from_secs(30), self.response_rx.recv()).await {
-//             Ok(Some(response)) => {
-//                 // Process response
-//                 Ok(CommandOutput::Text(response))
-//             }
-//             Ok(None) => {
-//                 // Channel closed
-//                 self.status = SessionStatus::Disconnected;
-//                 Err("Session disconnected".to_string())
-//             }
-//             Err(_) => {
-//                 // Timeout
-//                 Err("Command timed out".to_string())
-//             }
-//         }
-//     }
-//
-//     // Check if the session is alive by sending a ping
-//     pub async fn check_alive(&mut self) -> bool {
-//         if self.status == SessionStatus::Terminated {
-//             return false;
-//         }
-//
-//         // Try to send a ping command
-//         match self.execute_command("ping").await {
-//             Ok(_) => {
-//                 self.status = SessionStatus::Active;
-//                 true
-//             }
-//             Err(_) => {
-//                 // If we can't ping, mark as disconnected but not terminated
-//                 // It might come back online later
-//                 self.status = SessionStatus::Disconnected;
-//                 false
-//             }
-//         }
-//     }
-//
-//     // Terminate the session
-//     pub async fn terminate(&mut self) -> Result<(), String> {
-//         // Send exit command to agent if still connected
-//         if self.status == SessionStatus::Active {
-//             // Best effort to tell the agent to exit
-//             let _ = self.execute_command("exit").await;
-//         }
-//
-//         // Mark as terminated regardless of agent response
-//         self.status = SessionStatus::Terminated;
-//
-//         Ok(())
-//     }
-//
-//     // Get the time since the last check-in
-//     pub fn time_since_last_check_in(&self) -> Duration {
-//         SystemTime::now()
-//             .duration_since(self.last_check_in)
-//             .unwrap_or(Duration::from_secs(0))
-//     }
-//
-//     // Get a display name for the session
-//     pub fn display_name(&self) -> String {
-//         format!(
-//             "{} ({}@{})",
-//             self.name, self.metadata.username, self.metadata.hostname
-//         )
-//     }
-// }
-//
-// // Create a new session with default metadata for testing
-// impl Default for SessionMetadata {
-//     fn default() -> Self {
-//         SessionMetadata {
-//             os_type: "unknown".to_string(),
-//             os_version: "unknown".to_string(),
-//             hostname: "unknown".to_string(),
-//             username: "unknown".to_string(),
-//             agent_version: "1.0".to_string(),
-//             agent_build: "debug".to_string(),
-//             internal_ip: "0.0.0.0".to_string(),
-//             external_ip: "0.0.0.0".to_string(),
-//             privilege_level: PrivilegeLevel::Unknown,
-//             capabilities: vec![],
-//             custom: std::collections::HashMap::new(),
-//         }
-//     }
-// }
+
+impl ToString for SessionStatus {
+    fn to_string(&self) -> String {
+        match self {
+            SessionStatus::Active => "Active".to_string(),
+            SessionStatus::Idle => "Idle".to_string(),
+            SessionStatus::Disconnected => "Disconnected".to_string(),
+            SessionStatus::Terminated => "Terminated".to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Session {
+    /// Unique ID for this session
+    id: usize,
+
+    /// Agent identifier (could be a name, hostname, or another UUID)
+    agent_id: String,
+
+    /// Address the agent connected from
+    ip_address: String,
+
+    /// When the session was created
+    created_at: SystemTime,
+
+    /// Last time communication was received from this session
+    last_seen: SystemTime,
+
+    /// Current status of the session
+    status: Arc<Mutex<SessionStatus>>,
+
+    /// Flag indicating if session is active
+    active: AtomicBool,
+
+    /// Channel for sending commands to the agent
+    command_tx: Option<mpsc::Sender<String>>,
+
+    /// Channel for receiving responses from the agent
+    response_rx: Option<mpsc::Receiver<String>>,
+
+    /// Channel for receiving heartbeats or other events from the agent
+    event_rx: Option<mpsc::Receiver<SessionEvent>>,
+}
+
+/// Events that can be sent from an agent to the server
+#[derive(Debug, Clone)]
+pub enum SessionEvent {
+    Heartbeat,
+    Error(String),
+    Info(String),
+    Disconnect,
+}
+
+impl Session {
+    /// Create a new session
+    pub fn new(id: usize, agent_id: String, ip_address: String) -> Self {
+        let now = SystemTime::now();
+
+        Self {
+            id,
+            agent_id,
+            ip_address,
+            created_at: now,
+            last_seen: now,
+            status: Arc::new(Mutex::new(SessionStatus::Active)),
+            active: AtomicBool::new(true),
+            command_tx: None,
+            response_rx: None,
+            event_rx: None,
+        }
+    }
+
+    /// Initialize communication channels
+    pub fn init_channels(&mut self) -> mpsc::Sender<String> {
+        // Create channels for command/response communication
+        let (command_tx, command_rx) = mpsc::channel(100);
+        let (response_tx, response_rx) = mpsc::channel(100);
+        let (event_tx, event_rx) = mpsc::channel(100);
+
+        // Store our end of the channels
+        self.command_tx = Some(command_tx.clone());
+        self.response_rx = Some(response_rx);
+        self.event_rx = Some(event_rx);
+
+        // Return the command receiver that should be passed to the agent handler
+        command_tx
+    }
+
+    /// Send a command to the agent
+    pub async fn send_command(&self, command: String) -> Result<(), String> {
+        match &self.command_tx {
+            Some(tx) => tx
+                .send(command)
+                .await
+                .map_err(|e| format!("Failed to send command: {}", e)),
+            None => Err("Session has no command channel".to_string()),
+        }
+    }
+
+    /// Receive a response from the agent with timeout
+    pub async fn receive_response(&mut self, timeout: Duration) -> Result<String, String> {
+        match &mut self.response_rx {
+            Some(rx) => {
+                tokio::select! {
+                    response = rx.recv() => {
+                        match response {
+                            Some(msg) => {
+                                // Update last seen timestamp
+                                self.update_last_seen();
+                                Ok(msg)
+                            },
+                            None => Err("Agent disconnected".to_string()),
+                        }
+                    }
+                    _ = tokio::time::sleep(timeout) => {
+                        Err("Response timeout".to_string())
+                    }
+                }
+            }
+            None => Err("Session has no response channel".to_string()),
+        }
+    }
+
+    /// Process events from the agent
+    pub async fn process_events(&mut self) {
+        if let Some(mut rx) = self.event_rx.take() {
+            let id = self.id;
+            let status = Arc::clone(&self.status);
+
+            tokio::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        SessionEvent::Heartbeat => {
+                            // Update status to Active
+                            if let Ok(mut status_guard) = status.lock() {
+                                if *status_guard == SessionStatus::Idle {
+                                    *status_guard = SessionStatus::Active;
+                                }
+                            }
+                            log::debug!("Received heartbeat from session {}", id);
+                        }
+                        SessionEvent::Error(error) => {
+                            log::error!("Error from session {}: {}", id, error);
+                        }
+                        SessionEvent::Info(info) => {
+                            log::info!("Info from session {}: {}", id, info);
+                        }
+                        SessionEvent::Disconnect => {
+                            // Update status to Disconnected
+                            if let Ok(mut status_guard) = status.lock() {
+                                *status_guard = SessionStatus::Disconnected;
+                            }
+                            log::info!("Session {} disconnected", id);
+                            break;
+                        }
+                    }
+                }
+
+                // Channel closed
+                if let Ok(mut status_guard) = status.lock() {
+                    *status_guard = SessionStatus::Terminated;
+                }
+                log::info!("Event channel for session {} closed", id);
+            });
+        }
+    }
+
+    /// Update the last seen timestamp
+    pub fn update_last_seen(&mut self) {
+        self.last_seen = SystemTime::now();
+    }
+
+    /// Mark session as idle
+    pub fn set_idle(&self) {
+        if let Ok(mut status) = self.status.lock() {
+            *status = SessionStatus::Idle;
+        }
+    }
+
+    /// Mark session as active
+    pub fn set_active(&self) {
+        if let Ok(mut status) = self.status.lock() {
+            *status = SessionStatus::Active;
+        }
+    }
+
+    /// Terminate the session
+    pub fn terminate(&self) {
+        self.active.store(false, Ordering::SeqCst);
+        if let Ok(mut status) = self.status.lock() {
+            *status = SessionStatus::Terminated;
+        }
+    }
+
+    /// Check if session is active
+    pub fn is_active(&self) -> bool {
+        self.active.load(Ordering::SeqCst)
+    }
+
+    /// Get session ID
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    /// Get agent ID
+    pub fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
+    /// Get address
+    pub fn address(&self) -> &str {
+        &self.ip_address
+    }
+
+    /// Get last seen timestamp as a string
+    pub fn last_seen(&self) -> String {
+        match self.last_seen.elapsed() {
+            Ok(elapsed) => {
+                if elapsed.as_secs() < 60 {
+                    "Just now".to_string()
+                } else if elapsed.as_secs() < 3600 {
+                    format!("{} minutes ago", elapsed.as_secs() / 60)
+                } else if elapsed.as_secs() < 86400 {
+                    format!("{} hours ago", elapsed.as_secs() / 3600)
+                } else {
+                    format!("{} days ago", elapsed.as_secs() / 86400)
+                }
+            }
+            Err(_) => "Time error".to_string(),
+        }
+    }
+
+    /// Get session status
+    pub fn status(&self) -> String {
+        match self.status.lock() {
+            Ok(status) => status.to_string(),
+            Err(_) => "Unknown".to_string(),
+        }
+    }
+}
+
+/// SessionManager handles creation and tracking of sessions
+pub struct SessionManager {
+    sessions: Arc<Mutex<Vec<Arc<Session>>>>,
+    next_id: AtomicUsize,
+}
+
+impl SessionManager {
+    /// Create a new session manager
+    pub fn new() -> Self {
+        Self {
+            sessions: Arc::new(Mutex::new(Vec::new())),
+            next_id: AtomicUsize::new(0),
+        }
+    }
+
+    /// Create a new session
+    pub fn create_session(&self, agent_id: String, ip_address: String) -> Arc<Session> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let session = Arc::new(Session::new(id, agent_id, ip_address));
+
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.push(session.clone());
+        }
+
+        session
+    }
+
+    /// Get a session by ID
+    pub fn get_session(&self, id: &usize) -> Option<Arc<Session>> {
+        if let Ok(sessions) = self.sessions.lock() {
+            sessions.iter().find(|s| s.id() == *id).cloned()
+        } else {
+            None
+        }
+    }
+
+    /// Remove a session
+    pub fn remove_session(&self, id: &usize) -> bool {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            let len_before = sessions.len();
+            sessions.retain(|s| s.id() != *id);
+            sessions.len() < len_before
+        } else {
+            false
+        }
+    }
+
+    /// Get all sessions
+    pub fn get_all_sessions(&self) -> Vec<Arc<Session>> {
+        if let Ok(sessions) = self.sessions.lock() {
+            sessions.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Clean up inactive sessions
+    pub fn cleanup_inactive(&self, timeout: Duration) -> usize {
+        let mut removed = 0;
+
+        if let Ok(mut sessions) = self.sessions.lock() {
+            let len_before = sessions.len();
+
+            sessions.retain(|session| {
+                // Keep active sessions
+                session.is_active()
+            });
+
+            removed = len_before - sessions.len();
+        }
+
+        removed
+    }
+
+    /// Activate a session
+    /// Returns result
+    pub fn activate_session(&self, id: &usize) -> Result<(), String> {
+        if let Some(session) = self.get_session(id) {
+            session.set_active();
+            Ok(())
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    /// Kill all sessions
+    pub fn kill_all_sessions(&self) {
+        if let Ok(mut sessions) = self.sessions.lock() {
+            for session in sessions.iter() {
+                session.terminate();
+            }
+            sessions.clear();
+        }
+    }
+}
+
+impl Default for SessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    #[test]
+    fn test_session_creation() {
+        // let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let addr = "192.168.0.1";
+        let session = Session::new(0, "test-agent".to_string(), addr.to_string());
+
+        assert_eq!(session.agent_id(), "test-agent");
+        assert_eq!(session.address(), addr);
+        assert_eq!(session.status(), "Active");
+        assert!(session.is_active());
+    }
+
+    #[test]
+    fn test_session_status_changes() {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+        let session = Session::new(1, "test-agent".to_string(), addr.to_string());
+
+        // Initially active
+        assert_eq!(session.status(), "Active");
+
+        // Set to idle
+        session.set_idle();
+        assert_eq!(session.status(), "Idle");
+
+        // Set back to active
+        session.set_active();
+        assert_eq!(session.status(), "Active");
+
+        // Terminate
+        session.terminate();
+        assert_eq!(session.status(), "Terminated");
+        assert!(!session.is_active());
+    }
+
+    #[tokio::test]
+    async fn test_session_manager() {
+        let manager = SessionManager::new();
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+
+        // Create a session
+        let session = manager.create_session("test-agent".to_string(), addr.to_string());
+        let id = session.id();
+
+        // Get session by ID
+        let retrieved = manager.get_session(&id);
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().id(), id);
+
+        // Remove session
+        assert!(manager.remove_session(&id));
+
+        // Session should be gone
+        let retrieved = manager.get_session(&id);
+        assert!(retrieved.is_none());
+    }
+}

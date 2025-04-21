@@ -1,12 +1,12 @@
 use crate::listener::http_listener::HttpListener;
 use crate::listener::*;
 use crate::message::{CommandError, CommandOutput, CommandResult};
-use crate::session::Session;
+use crate::session::SessionManager;
 use std::any::Any;
 use std::collections::HashMap;
 use std::result::Result;
 use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 use clap;
@@ -34,11 +34,13 @@ pub trait RbCommand: Send + Sync {
 
 // Context passed to commands (can contain server state, active session, etc.)
 pub struct CommandContext {
-    // pub active_session: Option<Arc<Mutex<Session>>>,
-    pub sessions: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Session>>>>>,
+    // pub sessions: Arc<RwLock<HashMap<Uuid, Arc<Session>>>>,
+    pub session_manager: Arc<RwLock<SessionManager>>,
+    // pub active_session: Option<Arc<Session>>,
     pub command_registry: Arc<CommandRegistry>,
-    // pub listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<dyn Listener>>>>>>,
-    pub listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
+    // pub listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<dyn Listener>>>>>>, // Should switch to a generic listener type like this later
+    pub listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>, // For now, only
+                                                                             // HTTP listeners
 }
 
 // Command Registry that holds both server and implant commands
@@ -56,6 +58,7 @@ impl CommandRegistry {
 
         // Register built-in server commands
         registry.register(Box::new(server_cmds::ServerListenersCommand {}));
+        registry.register(Box::new(server_cmds::ServerSessionsCommand {}));
         // registry.register(Box::new(ServerSessionsCommand {}));
         registry.register(Box::new(server_cmds::ServerHelpCommand {}));
 
