@@ -21,9 +21,17 @@ pub enum CommandType {
 
 // Base Command trait that both types will implement
 pub trait RbCommand: Send + Sync {
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
     fn command_type(&self) -> CommandType;
-    fn description(&self) -> &str;
+    fn description(&self) -> &'static str;
+    fn clap_command(&self) -> clap::Command {
+        let name = self.name();
+        let description = self.description();
+
+        clap::Command::new(name)
+            .about(description)
+            .arg_required_else_help(true)
+    }
     fn parse_args(&self, command_line: &str) -> Result<Box<dyn Any>, clap::Error>;
     fn execute_with_parsed_args(
         &self,

@@ -20,7 +20,7 @@ struct ListenerArgs {
 pub struct ServerListenersCommand {}
 
 impl RbCommand for ServerListenersCommand {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "listeners"
     }
 
@@ -28,15 +28,13 @@ impl RbCommand for ServerListenersCommand {
         CommandType::Server
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Manage C2 listeners"
     }
 
     fn parse_args(&self, command_line: &str) -> Result<Box<dyn Any>, clap::Error> {
-        // Yes I am hardcoding the name and description because I had weird ownership issues
-        // Problem??
-        let cmd = clap::Command::new("listeners")
-            .about("Manage RustBucket C2 listeners")
+        let cmd = clap::Command::new(self.name())
+            .about(self.description().to_string())
             .subcommand(clap::Command::new("list").about("List all active listeners"))
             .subcommand(
                 clap::Command::new("start")
@@ -254,12 +252,10 @@ impl RbCommand for ServerListenersCommand {
                                     }
                                 });
 
-
                                 Ok(CommandOutput::Text(format!(
                                     "HTTP listener '{}' starting on {}:{} (ID: {})",
                                     listener_name, bind_address, port, listener_id
                                 )))
-
                             }
                             "tcp" => {
                                 // Currently only HTTP is implemented

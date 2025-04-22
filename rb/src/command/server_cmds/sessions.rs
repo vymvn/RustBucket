@@ -28,8 +28,8 @@ impl RbCommand for ServerSessionsCommand {
     }
 
     fn parse_args(&self, command_line: &str) -> Result<Box<dyn Any>, clap::Error> {
-        let cmd = clap::Command::new("sessions")
-            .about("Manage sessions")
+        let cmd = clap::Command::new(self.name())
+            .about(self.description().to_string())
             .subcommand(clap::Command::new("list").about("List all sessions"))
             .subcommand(
                 clap::Command::new("kill").about("Kill a session").arg(

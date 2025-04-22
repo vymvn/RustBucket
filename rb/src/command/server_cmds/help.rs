@@ -11,7 +11,7 @@ struct HelpArgs {
 pub struct ServerHelpCommand {}
 
 impl RbCommand for ServerHelpCommand {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "help"
     }
 
@@ -19,13 +19,13 @@ impl RbCommand for ServerHelpCommand {
         CommandType::Server
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Displays help menu"
     }
 
     fn parse_args(&self, command_line: &str) -> Result<Box<dyn Any>, clap::Error> {
         // Create the command with a String, not a reference
-        let cmd = clap::Command::new("help")
+        let cmd = clap::Command::new(self.name())
             .about(self.description().to_string())
             .arg(
                 clap::Arg::new("command")
