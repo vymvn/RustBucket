@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 /// Status of a session
 #[derive(Debug, Clone, PartialEq)]
@@ -31,7 +30,7 @@ pub struct Session {
     id: usize,
 
     /// Agent identifier (could be a name, hostname, or another UUID)
-    agent_id: String,
+    agent_hostname: String,
 
     /// Address the agent connected from
     ip_address: String,
@@ -69,12 +68,12 @@ pub enum SessionEvent {
 
 impl Session {
     /// Create a new session
-    pub fn new(id: usize, agent_id: String, ip_address: String) -> Self {
+    pub fn new(id: usize, agent_hostname: String, ip_address: String) -> Self {
         let now = SystemTime::now();
 
         Self {
             id,
-            agent_id,
+            agent_hostname,
             ip_address,
             created_at: now,
             last_seen: now,
@@ -218,9 +217,9 @@ impl Session {
         self.id
     }
 
-    /// Get agent ID
-    pub fn agent_id(&self) -> &str {
-        &self.agent_id
+    /// Get agent hostname
+    pub fn agent_hostname(&self) -> &str {
+        &self.agent_hostname
     }
 
     /// Get address
@@ -271,9 +270,9 @@ impl SessionManager {
     }
 
     /// Create a new session
-    pub fn create_session(&self, agent_id: String, ip_address: String) -> Arc<Session> {
+    pub fn create_session(&self, agent_hostname: String, ip_address: String) -> Arc<Session> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let session = Arc::new(Session::new(id, agent_id, ip_address));
+        let session = Arc::new(Session::new(id, agent_hostname, ip_address));
 
         if let Ok(mut sessions) = self.sessions.lock() {
             sessions.push(session.clone());
@@ -368,7 +367,7 @@ mod tests {
         let addr = "192.168.0.1";
         let session = Session::new(0, "test-agent".to_string(), addr.to_string());
 
-        assert_eq!(session.agent_id(), "test-agent");
+        assert_eq!(session.agent_hostname(), "test-agent");
         assert_eq!(session.address(), addr);
         assert_eq!(session.status(), "Active");
         assert!(session.is_active());

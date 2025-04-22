@@ -254,34 +254,12 @@ impl RbCommand for ServerListenersCommand {
                                     }
                                 });
 
-                                // This is a synchronous function, so we need to handle the async result somehow
-                                // We can either:
-                                // 1. Return a "pending" result and have the caller check later
-                                // 2. Use a local executor to wait for the result without blocking the thread
-
-                                // For simplicity, we'll return a "pending" message
-                                // In a real implementation, you might want a more sophisticated approach
 
                                 Ok(CommandOutput::Text(format!(
                                     "HTTP listener '{}' starting on {}:{} (ID: {})",
                                     listener_name, bind_address, port, listener_id
                                 )))
 
-                                // Alternative implementation for a synchronous result:
-                                // use futures::executor::block_on;
-                                // match block_on(rx) {
-                                //     Ok(Ok(_)) => Ok(CommandOutput::Text(format!(
-                                //         "HTTP listener '{}' started on {}:{} (ID: {})",
-                                //         listener_name, bind_address, port, listener_id
-                                //     ))),
-                                //     Ok(Err(e)) => Err(CommandError::ExecutionFailed(format!(
-                                //         "Failed to start listener: {}",
-                                //         e
-                                //     ))),
-                                //     Err(_) => Err(CommandError::ExecutionFailed(
-                                //         "Internal error: listener task failed".to_string()
-                                //     )),
-                                // }
                             }
                             "tcp" => {
                                 // Currently only HTTP is implemented

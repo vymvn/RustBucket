@@ -94,7 +94,7 @@ impl RbCommand for ServerSessionsCommand {
                         // Format as a table
                         let headers = vec![
                             "ID".to_string(),
-                            "Agent ID".to_string(),
+                            "Hostname".to_string(),
                             "Address".to_string(),
                             "Last Seen".to_string(),
                             "Status".to_string(),
@@ -106,7 +106,7 @@ impl RbCommand for ServerSessionsCommand {
                             // Access session properties directly as it's an Arc<Session>, not mutex protected
                             rows.push(vec![
                                 session.id().to_string(),
-                                session.agent_id().to_string(),
+                                session.agent_hostname().to_string(),
                                 session.address().to_string(),
                                 session.last_seen().to_string(),
                                 session.status().to_string(),

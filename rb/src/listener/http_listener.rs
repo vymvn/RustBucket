@@ -136,7 +136,7 @@ impl HttpListener {
 
                             // Create a new session
                             let mgr = data.session_manager.write().unwrap();
-                            mgr.create_session(new_id.to_string(), checkin.ip_address.to_string());
+                            mgr.create_session(checkin.hostname.to_string(), checkin.ip_address.to_string());
 
                             new_id
                         }
@@ -158,7 +158,7 @@ impl HttpListener {
 
                         // Create a new session
                         let mgr = data.session_manager.write().unwrap();
-                        mgr.create_session(new_id.to_string(), checkin.ip_address.to_string());
+                        mgr.create_session(checkin.hostname.to_string(), checkin.ip_address.to_string());
 
                         new_id
                     };
