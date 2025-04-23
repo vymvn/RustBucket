@@ -14,12 +14,11 @@ use uuid::Uuid;
 use crate::listener::*;
 use crate::message::*;
 use crate::session::SessionManager;
+use crate::task::*;
 
 // Server state
 pub struct ServerState {
     pub beacons: Arc<Mutex<HashMap<Uuid, BeaconInfo>>>,
-    pub tasks: Arc<Mutex<HashMap<Uuid, Task>>>,
-    pub results: Arc<Mutex<HashMap<Uuid, TaskResult>>>,
 }
 
 pub struct HttpListener {
@@ -46,8 +45,8 @@ impl HttpListener {
             handle: None,
             state: Arc::new(ServerState {
                 beacons: Arc::new(Mutex::new(HashMap::new())),
-                tasks: Arc::new(Mutex::new(HashMap::new())),
-                results: Arc::new(Mutex::new(HashMap::new())),
+                // tasks: Arc::new(Mutex::new(HashMap::new())),
+                // results: Arc::new(Mutex::new(HashMap::new())),
             }),
         }
     }
@@ -136,7 +135,10 @@ impl HttpListener {
 
                             // Create a new session
                             let mgr = data.session_manager.write().unwrap();
-                            mgr.create_session(checkin.hostname.to_string(), checkin.ip_address.to_string());
+                            let session = mgr.create_session(
+                                checkin.hostname.to_string(),
+                                checkin.ip_address.to_string(),
+                            );
 
                             new_id
                         }
@@ -158,7 +160,10 @@ impl HttpListener {
 
                         // Create a new session
                         let mgr = data.session_manager.write().unwrap();
-                        mgr.create_session(checkin.hostname.to_string(), checkin.ip_address.to_string());
+                        mgr.create_session(
+                            checkin.hostname.to_string(),
+                            checkin.ip_address.to_string(),
+                        );
 
                         new_id
                     };
@@ -191,25 +196,28 @@ impl HttpListener {
                         }
                     }
 
-                    // Get pending tasks for this beacon
-                    let tasks = data.state.tasks.lock().unwrap();
-                    let pending_tasks: Vec<Task> = tasks
-                        .values()
-                        .filter(|task| {
-                            task.beacon_id == beacon_id
-                                && matches!(task.status, TaskStatus::Pending)
-                        })
-                        .cloned()
-                        .collect();
+                    // Get session manager and find tasks for this beacon
+                    let session_manager = data.session_manager.read().unwrap();
+
+                    // Find session ID from beacon ID (you'll need to implement this mapping)
+                    let session_id = match session_manager.get_session_id_by_beacon(&beacon_id) {
+                        Ok(id) => id,
+                        Err(_) => {
+                            return HttpResponse::NotFound().body("No session found for beacon")
+                        }
+                    };
+
+                    // Get pending tasks and mark them as in progress
+                    let session = match session_manager.get_session(&session_id) {
+                        Some(s) => s,
+                        None => return HttpResponse::NotFound().body("Session not found"),
+                    };
+
+                    let pending_tasks = session.get_pending_tasks();
 
                     // Mark tasks as in progress
-                    {
-                        let mut tasks = data.state.tasks.lock().unwrap();
-                        for task in &pending_tasks {
-                            if let Some(t) = tasks.get_mut(&task.id) {
-                                t.status = TaskStatus::InProgress;
-                            }
-                        }
+                    for task in &pending_tasks {
+                        session.mark_task_in_progress(&task.id);
                     }
 
                     HttpResponse::Ok().json(pending_tasks)
@@ -222,26 +230,16 @@ impl HttpListener {
                 ) -> impl Responder {
                     let task_result = result.into_inner();
 
-                    // Update task status
-                    {
-                        let mut tasks = data.state.tasks.lock().unwrap();
-                        if let Some(task) = tasks.get_mut(&task_result.task_id) {
-                            task.status = task_result.status.clone();
-                        } else {
-                            return HttpResponse::NotFound().body("Task not found");
-                        }
+                    // Use session manager to submit the result
+                    let session_manager = data.session_manager.read().unwrap();
+                    let beacon_id = task_result.beacon_id;
+                    match session_manager.submit_task_result(beacon_id, task_result) {
+                        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+                            "status": "success",
+                            "message": "Task result received"
+                        })),
+                        Err(e) => HttpResponse::BadRequest().body(e),
                     }
-
-                    // Store the result
-                    {
-                        let mut results = data.state.results.lock().unwrap();
-                        results.insert(task_result.task_id, task_result);
-                    }
-
-                    HttpResponse::Ok().json(serde_json::json!({
-                        "status": "success",
-                        "message": "Task result received"
-                    }))
                 }
 
                 // Create a new task for a beacon
@@ -295,24 +293,43 @@ impl HttpListener {
                         }
                     }
 
-                    // Create new task
-                    let task_id = Uuid::new_v4();
-                    let task = Task {
-                        id: task_id,
-                        beacon_id,
-                        command,
-                        args,
-                        created_at: SystemTime::now(),
-                        status: TaskStatus::Pending,
-                    };
+                    // // Create new task
+                    // let task_id = Uuid::new_v4();
+                    // let task = Task {
+                    //     id: task_id,
+                    //     beacon_id,
+                    //     command,
+                    //     args,
+                    //     created_at: SystemTime::now(),
+                    //     status: TaskStatus::Pending,
+                    // };
 
-                    // Store task
-                    {
-                        let mut tasks = data.state.tasks.lock().unwrap();
-                        tasks.insert(task_id, task.clone());
+                    // Use session manager to create the task
+                    let session_manager = data.session_manager.read().unwrap();
+                    let result = session_manager.add_task_by_beacon(beacon_id, command, args);
+
+                    match result {
+                        Ok(task_id) => {
+                            // Get the task details to return
+                            // You'll need a way to look up the task by ID across sessions
+                            // For now, let's assume we can get the session by beacon ID
+                            match session_manager.get_session_id_by_beacon(&beacon_id) {
+                                Ok(session_id) => {
+                                    if let Some(session) = session_manager.get_session(&session_id)
+                                    {
+                                        if let Some(task) = session.get_task(&task_id) {
+                                            return HttpResponse::Ok().json(task);
+                                        }
+                                    }
+                                    HttpResponse::InternalServerError()
+                                        .body("Task created but could not be retrieved")
+                                }
+                                Err(_) => HttpResponse::InternalServerError()
+                                    .body("Session not found for beacon"),
+                            }
+                        }
+                        Err(e) => HttpResponse::BadRequest().body(e),
                     }
-
-                    HttpResponse::Ok().json(task)
                 }
 
                 // List all active beacons
@@ -388,33 +405,33 @@ impl HttpListener {
     }
 
     // Helper method to add a task to a beacon
-    pub fn add_beacon_task(
-        &self,
-        beacon_id: Uuid,
-        command: String,
-        args: Vec<String>,
-    ) -> Result<Uuid, String> {
-        let beacons = self.state.beacons.lock().unwrap();
-        if !beacons.contains_key(&beacon_id) {
-            return Err("Beacon not found".to_string());
-        }
-        drop(beacons);
-
-        let task_id = Uuid::new_v4();
-        let task = Task {
-            id: task_id,
-            beacon_id,
-            command,
-            args,
-            created_at: SystemTime::now(),
-            status: TaskStatus::Pending,
-        };
-
-        let mut tasks = self.state.tasks.lock().unwrap();
-        tasks.insert(task_id, task);
-
-        Ok(task_id)
-    }
+    // pub fn add_beacon_task(
+    //     &self,
+    //     beacon_id: Uuid,
+    //     command: String,
+    //     args: Vec<String>,
+    // ) -> Result<Uuid, String> {
+    //     let beacons = self.state.beacons.lock().unwrap();
+    //     if !beacons.contains_key(&beacon_id) {
+    //         return Err("Beacon not found".to_string());
+    //     }
+    //     drop(beacons);
+    //
+    //     let task_id = Uuid::new_v4();
+    //     let task = Task {
+    //         id: task_id,
+    //         beacon_id,
+    //         command,
+    //         args,
+    //         created_at: SystemTime::now(),
+    //         status: TaskStatus::Pending,
+    //     };
+    //
+    //     let mut tasks = self.state.tasks.lock().unwrap();
+    //     tasks.insert(task_id, task);
+    //
+    //     Ok(task_id)
+    // }
 
     // Helper method to clean up stale beacons
     pub fn cleanup_stale_beacons(&self, timeout: Duration) -> usize {

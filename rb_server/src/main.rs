@@ -15,7 +15,7 @@ async fn main() {
 
     // Create mTLS configuration
     let mtls_config = config::MtlsConfig::new(
-        true, // Enable mTLS
+        false, // Enable mTLS
         "certs/ca-cert.pem".to_string(),
         "certs/client-cert.pem".to_string(),
         "certs/client-key.pem".to_string(),
@@ -24,8 +24,8 @@ async fn main() {
     );
 
     // Create server with mTLS enabled
-    // let conf = config::RbServerConfig::with_mtls("localhost".to_string(), 6666, false, mtls_config);
-    let conf = config::RbServerConfig::new("localhost".to_string(), 6666, false);
+    let conf = config::RbServerConfig::with_mtls("localhost".to_string(), 6666, false, mtls_config);
+    // let conf = config::RbServerConfig::new("localhost".to_string(), 6666, false);
     let c2 = server::RbServer::new(conf);
 
     // Start C2 server

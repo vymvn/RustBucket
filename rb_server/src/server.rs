@@ -325,18 +325,18 @@ impl RbServer {
         Ok(())
     }
 
-    /// Add a listener to the server
-    pub fn add_listener(&self, listener: Box<HttpListener>) -> Uuid {
-        let uuid = Uuid::new_v4(); // Generate a new UUID for this listener
-        let mut listeners = self.listeners.lock().unwrap();
-        listeners.insert(uuid, Arc::new(Mutex::new(listener)));
-        uuid // Return the UUID so the caller can reference this listener later
-    }
-
-    /// Get the current number of connected clients
-    pub fn client_count(&self) -> usize {
-        self.clients.lock().unwrap().len()
-    }
+    // /// Add a listener to the server
+    // pub fn add_listener(&self, listener: Box<HttpListener>) -> Uuid {
+    //     let uuid = Uuid::new_v4(); // Generate a new UUID for this listener
+    //     let mut listeners = self.listeners.lock().unwrap();
+    //     listeners.insert(uuid, Arc::new(Mutex::new(listener)));
+    //     uuid // Return the UUID so the caller can reference this listener later
+    // }
+    //
+    // /// Get the current number of connected clients
+    // pub fn client_count(&self) -> usize {
+    //     self.clients.lock().unwrap().len()
+    // }
 
     /// Handle an individual client connection
     async fn handle_client(
@@ -432,8 +432,8 @@ impl RbServer {
         Ok(())
     }
 
-    /// Check if the server is currently running
-    pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::SeqCst)
-    }
+    // /// Check if the server is currently running
+    // pub fn is_running(&self) -> bool {
+    //     self.running.load(Ordering::SeqCst)
+    // }
 }

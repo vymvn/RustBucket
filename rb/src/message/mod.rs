@@ -104,11 +104,11 @@ pub enum TaskStatus {
     Failed,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskResult {
-    pub task_id: Uuid,
-    pub beacon_id: Uuid,
-    pub output: String,
-    pub status: TaskStatus,
-    pub completed_at: SystemTime,
-}
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct TaskResult {
+//     pub task_id: Uuid,
+//     pub beacon_id: Uuid,
+//     pub output: String,
+//     pub status: TaskStatus,
+//     pub completed_at: SystemTime,
+// }

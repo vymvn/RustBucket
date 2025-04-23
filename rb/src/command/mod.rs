@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use clap;
 
+mod implant_cmds;
 mod server_cmds;
 
 // Define command types
@@ -71,9 +72,10 @@ impl CommandRegistry {
         registry.register(Box::new(server_cmds::ServerHelpCommand {}));
 
         // Register built-in implant commands
-        // registry.register(Box::new(ImplantLsCommand {}));
-        // registry.register(Box::new(ImplantPwdCommand {}));
-        // registry.register(Box::new(ImplantCatCommand {}));
+        registry.register(Box::new(implant_cmds::ImplantLsCommand {}));
+        registry.register(Box::new(implant_cmds::ImplantSysteminfoCommand {}));
+        registry.register(Box::new(implant_cmds::ImplantPwdCommand {}));
+        registry.register(Box::new(implant_cmds::ImplantCatCommand {}));
 
         registry
     }
@@ -125,7 +127,8 @@ impl CommandRegistry {
         }
 
         // If there's an active session, check implant commands
-        // if context.active_session.is_some() {
+        // let session_manager = context.session_manager.read().unwrap();
+        // if !session_manager.get_all_sessions().is_empty() {
         //     if let Some(command) = self.get_implant_command(command_name) {
         //         return self
         //             .execute_implant_command(command, context, command_line)
@@ -190,173 +193,3 @@ impl CommandRegistry {
         }
     }
 }
-
-// // Example server command implementation
-// pub struct ServerListenersCommand {}
-//
-// impl Command for ServerListenersCommand {
-//     fn name(&self) -> &str {
-//         "listeners"
-//     }
-//
-//     fn command_type(&self) -> CommandType {
-//         CommandType::Server
-//     }
-//
-//     fn description(&self) -> &str {
-//         "Manage C2 listeners"
-//     }
-//
-//     fn parse_args(&self, command_line: &str) -> Result<Box<dyn Any>, clap::Error> {
-//         use clap::{Arg, ArgAction, Command};
-//
-//         let cmd = Command::new(self.name())
-//             .about(self.description())
-//             .subcommand(Command::new("list").about("List all active listeners"))
-//             .subcommand(
-//                 Command::new("start")
-//                     .about("Start a new listener")
-//                     .arg(
-//                         Arg::new("type")
-//                             .help("Listener type (http, tcp)")
-//                             .required(true),
-//                     )
-//                     .arg(
-//                         Arg::new("bind")
-//                             .short('b')
-//                             .long("bind")
-//                             .help("Address to bind to")
-//                             .default_value("0.0.0.0"),
-//                     )
-//                     .arg(
-//                         Arg::new("port")
-//                             .short('p')
-//                             .long("port")
-//                             .help("Port to listen on")
-//                             .required(true),
-//                     ),
-//             )
-//             .subcommand(
-//                 Command::new("stop")
-//                     .about("Stop a listener")
-//                     .arg(Arg::new("id").help("Listener ID to stop").required(true)),
-//             );
-//
-//         // Get the arguments part (skip the command name)
-//         let args_str = command_line
-//             .trim_start()
-//             .strip_prefix(self.name())
-//             .unwrap_or("")
-//             .trim_start();
-//
-//         // Parse the arguments
-//         let matches = cmd.try_get_matches_from(
-//             std::iter::once(self.name()).chain(args_str.split_whitespace()),
-//         )?;
-//
-//         #[derive(Debug)]
-//         struct ListenerArgs {
-//             action: String,
-//             listener_type: Option<String>,
-//             bind_address: Option<String>,
-//             port: Option<u16>,
-//             id: Option<String>,
-//         }
-//
-//         let mut args = ListenerArgs {
-//             action: String::new(),
-//             listener_type: None,
-//             bind_address: None,
-//             port: None,
-//             id: None,
-//         };
-//
-//         // Parse subcommands
-//         if let Some(sub_matches) = matches.subcommand_matches("list") {
-//             args.action = "list".to_string();
-//         } else if let Some(sub_matches) = matches.subcommand_matches("start") {
-//             args.action = "start".to_string();
-//             args.listener_type = sub_matches.get_one::<String>("type").cloned();
-//             args.bind_address = sub_matches.get_one::<String>("bind").cloned();
-//             args.port = sub_matches.get_one::<u16>("port").copied();
-//         } else if let Some(sub_matches) = matches.subcommand_matches("stop") {
-//             args.action = "stop".to_string();
-//             args.id = sub_matches.get_one::<String>("id").cloned();
-//         }
-//
-//         Ok(Box::new(args))
-//     }
-//
-//     fn execute_with_parsed_args(
-//         &self,
-//         context: &mut CommandContext,
-//         args: Box<dyn Any>,
-//     ) -> CommandResult {
-//         // Implementation for executing the listeners command
-//         // ...
-//
-//         Ok(CommandOutput::Text("Listener command executed".to_string()))
-//     }
-// }
-
-// Example implant command
-// pub struct ImplantLsCommand {}
-//
-// impl Command for ImplantLsCommand {
-//     fn name(&self) -> &str {
-//         "ls"
-//     }
-//
-//     fn command_type(&self) -> CommandType {
-//         CommandType::Implant
-//     }
-//
-//     fn description(&self) -> &str {
-//         "List files in directory on implant"
-//     }
-//
-//     fn parse_args(&self, command_line: &str) -> Result<Box<dyn Any>, clap::Error> {
-//         use clap::{Arg, Command};
-//
-//         let cmd = Command::new(self.name())
-//             .about(self.description())
-//             .arg(Arg::new("path").help("Path to list").default_value("."));
-//
-//         // Get the arguments part
-//         let args_str = command_line
-//             .trim_start()
-//             .strip_prefix(self.name())
-//             .unwrap_or("")
-//             .trim_start();
-//
-//         let matches = cmd.try_get_matches_from(
-//             std::iter::once(self.name()).chain(args_str.split_whitespace()),
-//         )?;
-//
-//         #[derive(Debug)]
-//         struct LsArgs {
-//             path: String,
-//         }
-//
-//         let args = LsArgs {
-//             path: matches.get_one::<String>("path").unwrap().clone(),
-//         };
-//
-//         Ok(Box::new(args))
-//     }
-//
-//     fn execute_with_parsed_args(
-//         &self,
-//         context: &mut CommandContext,
-//         args: Box<dyn Any>,
-//     ) -> CommandResult {
-//         // For implant commands, this typically just prepares the command for sending
-//         // The actual execution happens in the implant
-//
-//         // In a real implementation, this would be sent to the active session
-//
-//         Ok(CommandOutput::Text(
-//             "ls command will be sent to implant".to_string(),
-//         ))
-//     }
-// }

@@ -1,8 +1,12 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tokio::sync::mpsc;
+use uuid::Uuid;
+
+use crate::task::{Task, TaskResult, TaskStatus};
 
 /// Status of a session
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +59,12 @@ pub struct Session {
 
     /// Channel for receiving heartbeats or other events from the agent
     event_rx: Option<mpsc::Receiver<SessionEvent>>,
+
+    /// Tasks assigned to this session
+    tasks: Arc<Mutex<Vec<Task>>>,
+
+    /// Task results received from this session
+    results: Arc<Mutex<Vec<TaskResult>>>,
 }
 
 /// Events that can be sent from an agent to the server
@@ -82,6 +92,8 @@ impl Session {
             command_tx: None,
             response_rx: None,
             event_rx: None,
+            tasks: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -180,6 +192,91 @@ impl Session {
         }
     }
 
+    /// Add a new task to this session
+    pub fn add_task(&self, command: String, args: Vec<String>) -> Uuid {
+        let task_id = Uuid::new_v4();
+        let task = Task {
+            id: task_id,
+            beacon_id: Uuid::new_v4(), // Or use some other ID that maps to this session
+            session_id: self.id,
+            command,
+            args,
+            created_at: SystemTime::now(),
+            status: TaskStatus::Pending,
+        };
+
+        // Add task to the session's task list
+        if let Ok(mut tasks) = self.tasks.lock() {
+            tasks.push(task);
+        }
+
+        task_id
+    }
+
+    /// Get all pending tasks
+    pub fn get_pending_tasks(&self) -> Vec<Task> {
+        if let Ok(tasks) = self.tasks.lock() {
+            tasks
+                .iter()
+                .filter(|task| matches!(task.status, TaskStatus::Pending))
+                .cloned()
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Mark a task as in progress
+    pub fn mark_task_in_progress(&self, task_id: &Uuid) -> bool {
+        if let Ok(mut tasks) = self.tasks.lock() {
+            if let Some(task) = tasks.iter_mut().find(|t| &t.id == task_id) {
+                task.status = TaskStatus::InProgress;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Add a task result
+    pub fn add_task_result(&self, result: TaskResult) -> bool {
+        // Update the task status
+        let mut updated = false;
+        if let Ok(mut tasks) = self.tasks.lock() {
+            if let Some(task) = tasks.iter_mut().find(|t| t.id == result.task_id) {
+                task.status = result.status.clone();
+                updated = true;
+            }
+        }
+
+        // Store the result
+        if updated {
+            if let Ok(mut results) = self.results.lock() {
+                results.push(result);
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Get a specific task by ID
+    pub fn get_task(&self, task_id: &Uuid) -> Option<Task> {
+        if let Ok(tasks) = self.tasks.lock() {
+            tasks.iter().find(|t| &t.id == task_id).cloned()
+        } else {
+            None
+        }
+    }
+
+    /// Get all task results
+    pub fn get_results(&self) -> Vec<TaskResult> {
+        if let Ok(results) = self.results.lock() {
+            results.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
     /// Update the last seen timestamp
     pub fn update_last_seen(&mut self) {
         self.last_seen = SystemTime::now();
@@ -258,6 +355,7 @@ impl Session {
 pub struct SessionManager {
     sessions: Arc<Mutex<Vec<Arc<Session>>>>,
     next_id: AtomicUsize,
+    beacon_to_session: Arc<Mutex<HashMap<Uuid, usize>>>,
 }
 
 impl SessionManager {
@@ -266,6 +364,7 @@ impl SessionManager {
         Self {
             sessions: Arc::new(Mutex::new(Vec::new())),
             next_id: AtomicUsize::new(0),
+            beacon_to_session: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -290,17 +389,6 @@ impl SessionManager {
         }
     }
 
-    /// Remove a session
-    pub fn remove_session(&self, id: &usize) -> bool {
-        if let Ok(mut sessions) = self.sessions.lock() {
-            let len_before = sessions.len();
-            sessions.retain(|s| s.id() != *id);
-            sessions.len() < len_before
-        } else {
-            false
-        }
-    }
-
     /// Get all sessions
     pub fn get_all_sessions(&self) -> Vec<Arc<Session>> {
         if let Ok(sessions) = self.sessions.lock() {
@@ -310,19 +398,23 @@ impl SessionManager {
         }
     }
 
-    /// Clean up inactive sessions
-    pub fn cleanup_inactive(&self, timeout: Duration) -> usize {
-        let mut removed = 0;
-
-        if let Ok(mut sessions) = self.sessions.lock() {
+    /// Delete a session by ID
+    pub fn remove_session(&self, id: &usize) -> bool {
+        // First remove from sessions list
+        let removed = if let Ok(mut sessions) = self.sessions.lock() {
             let len_before = sessions.len();
+            sessions.retain(|s| s.id() != *id);
+            sessions.len() < len_before
+        } else {
+            false
+        };
 
-            sessions.retain(|session| {
-                // Keep active sessions
-                session.is_active()
-            });
-
-            removed = len_before - sessions.len();
+        // Then clean up any beacon mappings
+        if removed {
+            if let Ok(mut mapping) = self.beacon_to_session.lock() {
+                // Remove all entries where the value is the session ID
+                mapping.retain(|_, session_id| session_id != id);
+            }
         }
 
         removed
@@ -346,6 +438,42 @@ impl SessionManager {
                 session.terminate();
             }
             sessions.clear();
+        }
+    }
+
+    // Implement the lookup method
+    pub fn get_session_id_by_beacon(&self, beacon_id: &Uuid) -> Result<usize, String> {
+        if let Ok(mapping) = self.beacon_to_session.lock() {
+            if let Some(session_id) = mapping.get(beacon_id) {
+                Ok(*session_id)
+            } else {
+                Err("No session found for this beacon ID".to_string())
+            }
+        } else {
+            Err("Failed to acquire lock on beacon mapping".to_string())
+        }
+    }
+
+    pub fn add_task_by_beacon(
+        &self,
+        beacon_id: Uuid,
+        command: String,
+        args: Vec<String>,
+    ) -> Result<Uuid, String> {
+        let session_id = self.get_session_id_by_beacon(&beacon_id)?;
+        if let Some(session) = self.get_session(&session_id) {
+            Ok(session.add_task(command, args))
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    pub fn submit_task_result(&self, beacon_id: Uuid, result: TaskResult) -> Result<bool, String> {
+        let session_id = self.get_session_id_by_beacon(&beacon_id)?;
+        if let Some(session) = self.get_session(&session_id) {
+            Ok(session.add_task_result(result))
+        } else {
+            Err("Session not found".to_string())
         }
     }
 }
