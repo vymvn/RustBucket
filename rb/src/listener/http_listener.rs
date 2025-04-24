@@ -199,7 +199,7 @@ impl HttpListener {
                     // Get session manager and find tasks for this beacon
                     let session_manager = data.session_manager.read().unwrap();
 
-                    // Find session ID from beacon ID (you'll need to implement this mapping)
+                    // Find session ID from beacon ID
                     let session_id = match session_manager.get_session_id_by_beacon(&beacon_id) {
                         Ok(id) => id,
                         Err(_) => {
@@ -243,94 +243,94 @@ impl HttpListener {
                 }
 
                 // Create a new task for a beacon
-                async fn create_task(
-                    task_data: web::Json<serde_json::Value>,
-                    data: web::Data<ListenerData>,
-                ) -> impl Responder {
-                    // Extract beacon ID and command from request
-                    let beacon_id_str = match task_data.get("beacon_id") {
-                        Some(val) => match val.as_str() {
-                            Some(s) => s,
-                            None => {
-                                return HttpResponse::BadRequest().body("Invalid beacon ID format")
-                            }
-                        },
-                        None => return HttpResponse::BadRequest().body("Missing beacon ID"),
-                    };
-
-                    let beacon_id = match Uuid::parse_str(beacon_id_str) {
-                        Ok(id) => id,
-                        Err(_) => return HttpResponse::BadRequest().body("Invalid beacon ID"),
-                    };
-
-                    let command = match task_data.get("command") {
-                        Some(val) => match val.as_str() {
-                            Some(s) => s.to_string(),
-                            None => {
-                                return HttpResponse::BadRequest().body("Invalid command format")
-                            }
-                        },
-                        None => return HttpResponse::BadRequest().body("Missing command"),
-                    };
-
-                    // Extract args (optional)
-                    let args = match task_data.get("args") {
-                        Some(val) => match val.as_array() {
-                            Some(arr) => arr
-                                .iter()
-                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                .collect(),
-                            None => Vec::new(),
-                        },
-                        None => Vec::new(),
-                    };
-
-                    // Verify beacon exists
-                    {
-                        let beacons = data.state.beacons.lock().unwrap();
-                        if !beacons.contains_key(&beacon_id) {
-                            return HttpResponse::NotFound().body("Beacon not found");
-                        }
-                    }
-
-                    // // Create new task
-                    // let task_id = Uuid::new_v4();
-                    // let task = Task {
-                    //     id: task_id,
-                    //     beacon_id,
-                    //     command,
-                    //     args,
-                    //     created_at: SystemTime::now(),
-                    //     status: TaskStatus::Pending,
-                    // };
-
-                    // Use session manager to create the task
-                    let session_manager = data.session_manager.read().unwrap();
-                    let result = session_manager.add_task_by_beacon(beacon_id, command, args);
-
-                    match result {
-                        Ok(task_id) => {
-                            // Get the task details to return
-                            // You'll need a way to look up the task by ID across sessions
-                            // For now, let's assume we can get the session by beacon ID
-                            match session_manager.get_session_id_by_beacon(&beacon_id) {
-                                Ok(session_id) => {
-                                    if let Some(session) = session_manager.get_session(&session_id)
-                                    {
-                                        if let Some(task) = session.get_task(&task_id) {
-                                            return HttpResponse::Ok().json(task);
-                                        }
-                                    }
-                                    HttpResponse::InternalServerError()
-                                        .body("Task created but could not be retrieved")
-                                }
-                                Err(_) => HttpResponse::InternalServerError()
-                                    .body("Session not found for beacon"),
-                            }
-                        }
-                        Err(e) => HttpResponse::BadRequest().body(e),
-                    }
-                }
+                // async fn create_task(
+                //     task_data: web::Json<serde_json::Value>,
+                //     data: web::Data<ListenerData>,
+                // ) -> impl Responder {
+                //     // Extract beacon ID and command from request
+                //     let beacon_id_str = match task_data.get("beacon_id") {
+                //         Some(val) => match val.as_str() {
+                //             Some(s) => s,
+                //             None => {
+                //                 return HttpResponse::BadRequest().body("Invalid beacon ID format")
+                //             }
+                //         },
+                //         None => return HttpResponse::BadRequest().body("Missing beacon ID"),
+                //     };
+                //
+                //     let beacon_id = match Uuid::parse_str(beacon_id_str) {
+                //         Ok(id) => id,
+                //         Err(_) => return HttpResponse::BadRequest().body("Invalid beacon ID"),
+                //     };
+                //
+                //     let action = match task_data.get("action") {
+                //         Some(val) => match val.as_str() {
+                //             Some(s) => s.to_string(),
+                //             None => {
+                //                 return HttpResponse::BadRequest().body("Invalid command format")
+                //             }
+                //         },
+                //         None => return HttpResponse::BadRequest().body("Missing command"),
+                //     };
+                //
+                //     // Extract args (optional)
+                //     let args = match task_data.get("args") {
+                //         Some(val) => match val.as_array() {
+                //             Some(arr) => arr
+                //                 .iter()
+                //                 .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                //                 .collect(),
+                //             None => Vec::new(),
+                //         },
+                //         None => Vec::new(),
+                //     };
+                //
+                //     // Verify beacon exists
+                //     {
+                //         let beacons = data.state.beacons.lock().unwrap();
+                //         if !beacons.contains_key(&beacon_id) {
+                //             return HttpResponse::NotFound().body("Beacon not found");
+                //         }
+                //     }
+                //
+                //     // // Create new task
+                //     // let task_id = Uuid::new_v4();
+                //     // let task = Task {
+                //     //     id: task_id,
+                //     //     beacon_id,
+                //     //     command,
+                //     //     args,
+                //     //     created_at: SystemTime::now(),
+                //     //     status: TaskStatus::Pending,
+                //     // };
+                //
+                //     // Use session manager to create the task
+                //     let session_manager = data.session_manager.read().unwrap();
+                //     let result = session_manager.add_task_by_beacon(beacon_id, action);
+                //
+                //     match result {
+                //         Ok(task_id) => {
+                //             // Get the task details to return
+                //             // You'll need a way to look up the task by ID across sessions
+                //             // For now, let's assume we can get the session by beacon ID
+                //             match session_manager.get_session_id_by_beacon(&beacon_id) {
+                //                 Ok(session_id) => {
+                //                     if let Some(session) = session_manager.get_session(&session_id)
+                //                     {
+                //                         if let Some(task) = session.get_task(&task_id) {
+                //                             return HttpResponse::Ok().json(task);
+                //                         }
+                //                     }
+                //                     HttpResponse::InternalServerError()
+                //                         .body("Task created but could not be retrieved")
+                //                 }
+                //                 Err(_) => HttpResponse::InternalServerError()
+                //                     .body("Session not found for beacon"),
+                //             }
+                //         }
+                //         Err(e) => HttpResponse::BadRequest().body(e),
+                //     }
+                // }
 
                 // List all active beacons
                 async fn list_beacons(data: web::Data<ListenerData>) -> impl Responder {
@@ -346,7 +346,7 @@ impl HttpListener {
                         .route("/beacon/checkin", web::post().to(beacon_checkin))
                         .route("/beacon/tasks/{beacon_id}", web::get().to(get_tasks))
                         .route("/beacon/results", web::post().to(upload_results))
-                        .route("/tasks", web::post().to(create_task))
+                        // .route("/tasks", web::post().to(create_task))
                         .route("/beacons", web::get().to(list_beacons))
                 })
                 .bind(server_addr)

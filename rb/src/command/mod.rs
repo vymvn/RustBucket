@@ -2,6 +2,7 @@ use crate::listener::http_listener::HttpListener;
 use crate::listener::*;
 use crate::message::{CommandError, CommandOutput, CommandRequest, CommandResult};
 use crate::session::SessionManager;
+use crate::task::TaskManager;
 use std::any::Any;
 use std::collections::HashMap;
 use std::result::Result;
@@ -45,6 +46,7 @@ pub trait RbCommand: Send + Sync {
 pub struct CommandContext {
     // pub sessions: Arc<RwLock<HashMap<Uuid, Arc<Session>>>>,
     pub session_manager: Arc<RwLock<SessionManager>>,
+    pub task_manager: Arc<RwLock<TaskManager>>,
     // pub active_session: Option<Arc<Session>>,
     pub command_registry: Arc<CommandRegistry>,
     // pub listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<dyn Listener>>>>>>, // Should switch to a generic listener type like this later
@@ -110,7 +112,11 @@ impl CommandRegistry {
     }
 
     // Execute a command with proper routing
-    pub async fn execute(&self, context: &mut CommandContext, command_request: CommandRequest) -> CommandResult {
+    pub async fn execute(
+        &self,
+        context: &mut CommandContext,
+        command_request: CommandRequest,
+    ) -> CommandResult {
         // Parse the command
         let parts: Vec<&str> = command_request.command_line.split_whitespace().collect();
         if parts.is_empty() {
@@ -130,15 +136,22 @@ impl CommandRegistry {
                     let session_manager = context.session_manager.read().unwrap();
                     session_manager.get_session(&session_id).is_some()
                 };
-                
+
                 if !session_exists {
                     return Err(CommandError::TargetNotFound(format!(
                         "Session with ID '{}' not found",
                         session_id
                     )));
                 }
-                
-                return self.execute_implant_command(command, context, command_request.command_line.as_str(), session_id).await;
+
+                return self
+                    .execute_implant_command(
+                        command,
+                        context,
+                        command_request.command_line.as_str(),
+                        session_id,
+                    )
+                    .await;
             } else {
                 return Err(CommandError::TargetNotFound(format!(
                     "Implant command '{}' not found",
@@ -148,7 +161,9 @@ impl CommandRegistry {
         } else {
             // No session_id, so it's a server command
             if let Some(command) = self.get_server_command(command_name) {
-                return self.execute_server_command(command, context, command_request.command_line.as_str()).await;
+                return self
+                    .execute_server_command(command, context, command_request.command_line.as_str())
+                    .await;
             } else {
                 return Err(CommandError::TargetNotFound(format!(
                     "Server command '{}' not found",
@@ -196,18 +211,30 @@ impl CommandRegistry {
                     let session_manager = context.session_manager.read().unwrap();
                     match session_manager.get_session(&session_id) {
                         Some(s) => s,
-                        None => return Err(CommandError::TargetNotFound(format!(
-                            "Session with ID '{}' not found",
-                            session_id
-                        ))),
+                        None => {
+                            return Err(CommandError::TargetNotFound(format!(
+                                "Session with ID '{}' not found",
+                                session_id
+                            )))
+                        }
                     }
                 };
-                
-                // Here you would implement the logic to send the command to the implant
-                // through the session and wait for a response
-                
-                // For now, we'll just execute it directly
-                command.execute_with_parsed_args(context, parsed_args)
+
+                let task_manager = context.task_manager.read().unwrap();
+                match task_manager.create_task(session_id, command.name().to_string()) {
+                    Ok(task_id) => {
+                        return Ok(CommandOutput::Text(format!(
+                            "Task created with ID: {} for session ID: {}",
+                            task_id, session_id
+                        )))
+                    }
+                    Err(err) => {
+                        return Err(CommandError::ExecutionFailed(format!(
+                            "Failed to create task: {}",
+                            err
+                        )))
+                    }
+                };
             }
             Err(err) => Err(CommandError::InvalidArguments(format!(
                 "Failed to parse arguments: {}",

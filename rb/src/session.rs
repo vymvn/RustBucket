@@ -193,14 +193,13 @@ impl Session {
     }
 
     /// Add a new task to this session
-    pub fn add_task(&self, command: String, args: Vec<String>) -> Uuid {
+    pub fn add_task(&self, action: String) -> Uuid {
         let task_id = Uuid::new_v4();
         let task = Task {
             id: task_id,
             beacon_id: Uuid::new_v4(), // Or use some other ID that maps to this session
             session_id: self.id,
-            command,
-            args,
+            action,
             created_at: SystemTime::now(),
             status: TaskStatus::Pending,
         };
@@ -454,15 +453,10 @@ impl SessionManager {
         }
     }
 
-    pub fn add_task_by_beacon(
-        &self,
-        beacon_id: Uuid,
-        command: String,
-        args: Vec<String>,
-    ) -> Result<Uuid, String> {
+    pub fn add_task_by_beacon(&self, beacon_id: Uuid, action: String) -> Result<Uuid, String> {
         let session_id = self.get_session_id_by_beacon(&beacon_id)?;
         if let Some(session) = self.get_session(&session_id) {
-            Ok(session.add_task(command, args))
+            Ok(session.add_task(action))
         } else {
             Err("Session not found".to_string())
         }

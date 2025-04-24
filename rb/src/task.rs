@@ -38,11 +38,8 @@ pub struct Task {
     /// Session ID for this task
     pub session_id: usize,
 
-    /// Command to execute
-    pub command: String,
-
-    /// Command arguments
-    pub args: Vec<String>,
+    /// Action to do
+    pub action: String,
 
     /// When the task was created
     pub created_at: SystemTime,
@@ -144,22 +141,27 @@ impl TaskManager {
         }
     }
 
+    /// Get beacon ID from session id
+    pub fn get_beacon_id_by_session(&self, session_id: usize) -> Result<Uuid, String> {
+        if let Ok(mapping) = self.beacon_to_session.lock() {
+            for (beacon_id, sid) in mapping.iter() {
+                if *sid == session_id {
+                    return Ok(*beacon_id);
+                }
+            }
+        }
+        Err(format!("No beacon found for session ID {}", session_id))
+    }
+
     /// Create a new task for a session
-    pub fn create_task(
-        &self,
-        session_id: usize,
-        beacon_id: Uuid,
-        command: String,
-        args: Vec<String>,
-    ) -> Result<Uuid, String> {
+    pub fn create_task(&self, session_id: usize, action: String) -> Result<Uuid, String> {
         let task_id = Uuid::new_v4();
 
         let task = Task {
             id: task_id,
-            beacon_id,
+            beacon_id: self.get_beacon_id_by_session(session_id)?,
             session_id,
-            command,
-            args,
+            action,
             created_at: SystemTime::now(),
             status: TaskStatus::Pending,
         };
@@ -441,11 +443,8 @@ pub struct TaskResponse {
     /// Beacon ID
     pub beacon_id: Uuid,
 
-    /// Command
-    pub command: String,
-
-    /// Arguments
-    pub args: Vec<String>,
+    /// Action
+    pub action: String,
 
     /// Status
     pub status: String,
@@ -468,8 +467,7 @@ impl From<Task> for TaskResponse {
         Self {
             id: task.id,
             beacon_id: task.beacon_id,
-            command: task.command,
-            args: task.args,
+            action: task.action,
             status: task.status.to_string(),
             created_at,
         }
@@ -540,16 +538,12 @@ mod tests {
             .unwrap();
 
         // Create a task
-        let command = "shell".to_string();
-        let args = vec!["ls".to_string(), "-la".to_string()];
-        let task_id = task_manager
-            .create_task(session_id, beacon_id, command, args)
-            .unwrap();
+        let action = "ls".to_string();
+        let task_id = task_manager.create_task(session_id, action).unwrap();
 
         // Check if we can get the task
         let task = task_manager.get_task(&task_id).unwrap();
-        assert_eq!(task.command, "shell");
-        assert_eq!(task.args, vec!["ls".to_string(), "-la".to_string()]);
+        assert_eq!(task.action, "ls");
         assert_eq!(task.status, TaskStatus::Pending);
     }
 
@@ -566,12 +560,7 @@ mod tests {
 
         // Create a task
         let task_id = task_manager
-            .create_task(
-                session_id,
-                beacon_id,
-                "shell".to_string(),
-                vec!["echo".to_string(), "hello".to_string()],
-            )
+            .create_task(session_id, "ls".to_string())
             .unwrap();
 
         // Update task status
@@ -597,12 +586,7 @@ mod tests {
 
         // Create a task
         let task_id = task_manager
-            .create_task(
-                session_id,
-                beacon_id,
-                "shell".to_string(),
-                vec!["echo".to_string(), "hello".to_string()],
-            )
+            .create_task(session_id, "pwd".to_string())
             .unwrap();
 
         // Submit a result
@@ -610,7 +594,7 @@ mod tests {
             task_id,
             beacon_id,
             session_id,
-            output: "hello\n".to_string(),
+            output: "C:\\Users\\testuser\\Desktop\n".to_string(),
             error: None,
             status_code: Some(0),
             status: TaskStatus::Completed,
@@ -622,7 +606,7 @@ mod tests {
 
         // Check if result is stored and task status updated
         let stored_result = task_manager.get_task_result(&task_id).unwrap();
-        assert_eq!(stored_result.output, "hello\n");
+        assert_eq!(stored_result.output, "C:\\Users\\testuser\\Desktop\n");
 
         let task = task_manager.get_task(&task_id).unwrap();
         assert_eq!(task.status, TaskStatus::Completed);
@@ -641,21 +625,11 @@ mod tests {
 
         // Create some tasks
         let task_id1 = task_manager
-            .create_task(
-                session_id,
-                beacon_id,
-                "shell".to_string(),
-                vec!["command1".to_string()],
-            )
+            .create_task(session_id, "ls".to_string())
             .unwrap();
 
         let task_id2 = task_manager
-            .create_task(
-                session_id,
-                beacon_id,
-                "shell".to_string(),
-                vec!["command2".to_string()],
-            )
+            .create_task(session_id, "systeminfo".to_string())
             .unwrap();
 
         // Submit a result for one task
