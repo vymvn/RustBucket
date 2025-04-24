@@ -106,7 +106,7 @@ impl RbCommand for ServerSessionsCommand {
                             // Access session properties directly as it's an Arc<Session>, not mutex protected
                             rows.push(vec![
                                 session.id().to_string(),
-                                session.agent_hostname().to_string(),
+                                session.implant_hostname().to_string(),
                                 session.address().to_string(),
                                 session.last_seen().to_string(),
                                 session.status().to_string(),

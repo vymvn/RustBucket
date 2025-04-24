@@ -18,7 +18,6 @@ use uuid::Uuid;
 use rb::command::CommandRegistry;
 use rb::message::{CommandRequest, CommandResult};
 use rb::session::SessionManager;
-use rb::task::TaskManager;
 
 pub struct RbServer {
     config: RbServerConfig,
@@ -29,7 +28,6 @@ pub struct RbServer {
     // sessions: Arc<Mutex<Vec<Session>>>,
     // sessions: Arc<std::sync::RwLock<HashMap<Uuid, Arc<Session>>>>,
     session_manager: Arc<RwLock<SessionManager>>,
-    task_manager: Arc<RwLock<TaskManager>>,
     running: Arc<AtomicBool>,
     server_task: Mutex<Option<JoinHandle<()>>>,
     command_registry: Arc<CommandRegistry>,
@@ -44,7 +42,6 @@ impl RbServer {
             listeners: Arc::new(Mutex::new(HashMap::new())),
             // sessions: Arc::new(std::sync::RwLock::new(HashMap::new())),
             session_manager: Arc::new(RwLock::new(SessionManager::new())),
-            task_manager: Arc::new(RwLock::new(TaskManager::new())),
             // listeners_manager: Arc::new(RwLock::new(ListenersManager::new())), // yet to implement this
             running: Arc::new(AtomicBool::new(false)),
             server_task: Mutex::new(None),
@@ -82,8 +79,6 @@ impl RbServer {
         let clients = self.clients.clone();
         // let sessions = self.sessions.clone();
         let session_manager = self.session_manager.clone();
-        let task_manager = self.task_manager.clone();
-        let task_manager = self.task_manager.clone();
         let command_registry = self.command_registry.clone();
         let listeners = self.listeners.clone();
 
@@ -103,7 +98,6 @@ impl RbServer {
 
                         let client_list = clients.clone();
                         let session_manager = session_manager.clone();
-                        let task_manager = task_manager.clone();
                         let running_clone = running.clone();
                         let command_registry_clone = command_registry.clone();
                         let listeners_clone = listeners.clone();
@@ -114,7 +108,6 @@ impl RbServer {
                                 client_id,
                                 client_list,
                                 session_manager,
-                                task_manager,
                                 listeners_clone,
                                 running_clone,
                                 command_registry_clone,
@@ -171,7 +164,6 @@ impl RbServer {
         let clients = self.clients.clone();
         // let sessions = self.sessions.clone();
         let session_manager = self.session_manager.clone();
-        let task_manager = self.task_manager.clone();
         let command_registry = self.command_registry.clone();
         let crl_path = self.config.mtls.crl_path.clone();
         let listeners = self.listeners.clone();
@@ -190,7 +182,6 @@ impl RbServer {
                         let client_list = clients.clone();
                         // let session_list = sessions.clone();
                         let session_manager = session_manager.clone();
-                        let task_manager = task_manager.clone();
                         let running_clone = running.clone();
                         let command_registry_clone = command_registry.clone();
                         let listeners_clone = listeners.clone();
@@ -280,7 +271,6 @@ impl RbServer {
                                 client_id,
                                 client_list,
                                 session_manager,
-                                task_manager,
                                 listeners_clone,
                                 running_clone,
                                 command_registry_clone,
@@ -355,7 +345,6 @@ impl RbServer {
         client_id: Uuid,
         clients: Arc<Mutex<Vec<Client>>>,
         session_manager: Arc<RwLock<SessionManager>>,
-        task_manager: Arc<RwLock<TaskManager>>,
         listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
         running: Arc<AtomicBool>,
         command_registry: Arc<CommandRegistry>,
@@ -392,7 +381,6 @@ impl RbServer {
                 log::info!("Received: {:?}", msg);
                 let mut cmd_context = CommandContext {
                     session_manager: session_manager.clone(),
-                    task_manager: task_manager.clone(),
                     // active_session: client.active_session.clone(),
                     command_registry: command_registry.clone(),
                     listeners: listeners.clone(),

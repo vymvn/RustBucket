@@ -62,9 +62,9 @@ pub enum CommandError {
     Internal(String),
 }
 
-// Beacon data structures
+// implant data structures
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BeaconInfo {
+pub struct ImplantInfo {
     pub id: Uuid,
     pub hostname: String,
     pub ip_address: String,
@@ -76,7 +76,7 @@ pub struct BeaconInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BeaconCheckin {
+pub struct ImplantCheckin {
     pub id: Option<Uuid>, // Optional for first registration
     pub hostname: String,
     pub ip_address: String,
@@ -88,7 +88,7 @@ pub struct BeaconCheckin {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: Uuid,
-    pub beacon_id: Uuid,
+    pub implant_id: Uuid,
     pub command: String,
     pub args: Vec<String>,
     pub created_at: SystemTime,
@@ -106,7 +106,7 @@ pub enum TaskStatus {
 // #[derive(Debug, Clone, Serialize, Deserialize)]
 // pub struct TaskResult {
 //     pub task_id: Uuid,
-//     pub beacon_id: Uuid,
+//     pub implant_id: Uuid,
 //     pub output: String,
 //     pub status: TaskStatus,
 //     pub completed_at: SystemTime,

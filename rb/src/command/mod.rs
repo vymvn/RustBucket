@@ -1,8 +1,7 @@
 use crate::listener::http_listener::HttpListener;
-use crate::listener::*;
 use crate::message::{CommandError, CommandOutput, CommandRequest, CommandResult};
 use crate::session::SessionManager;
-use crate::task::TaskManager;
+use crate::{listener::*, session};
 use std::any::Any;
 use std::collections::HashMap;
 use std::result::Result;
@@ -46,7 +45,6 @@ pub trait RbCommand: Send + Sync {
 pub struct CommandContext {
     // pub sessions: Arc<RwLock<HashMap<Uuid, Arc<Session>>>>,
     pub session_manager: Arc<RwLock<SessionManager>>,
-    pub task_manager: Arc<RwLock<TaskManager>>,
     // pub active_session: Option<Arc<Session>>,
     pub command_registry: Arc<CommandRegistry>,
     // pub listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<dyn Listener>>>>>>, // Should switch to a generic listener type like this later
@@ -220,21 +218,28 @@ impl CommandRegistry {
                     }
                 };
 
-                let task_manager = context.task_manager.read().unwrap();
-                match task_manager.create_task(session_id, command.name().to_string()) {
-                    Ok(task_id) => {
-                        return Ok(CommandOutput::Text(format!(
-                            "Task created with ID: {} for session ID: {}",
-                            task_id, session_id
-                        )))
-                    }
+                if match session.create_task(command.name().to_string()) {
+                    Ok(_) => true,
                     Err(err) => {
-                        return Err(CommandError::ExecutionFailed(format!(
+                        return Err(CommandError::TargetNotFound(format!(
                             "Failed to create task: {}",
                             err
                         )))
                     }
-                };
+                } {
+                    // Execute command with the parsed arguments
+                    // command.execute_with_parsed_args(context, parsed_args)
+                    Ok(CommandOutput::Text(format!(
+                        "Command '{}' executed on session ID '{}'",
+                        command.name(),
+                        session_id
+                    )))
+                } else {
+                    Err(CommandError::TargetNotFound(format!(
+                        "Failed to create task for session with ID '{}'",
+                        session_id
+                    )))
+                }
             }
             Err(err) => Err(CommandError::InvalidArguments(format!(
                 "Failed to parse arguments: {}",
