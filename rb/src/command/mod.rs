@@ -1,6 +1,6 @@
 use crate::listener::http_listener::HttpListener;
 use crate::listener::*;
-use crate::message::{CommandError, CommandOutput, CommandResult};
+use crate::message::{CommandError, CommandOutput, CommandRequest, CommandResult};
 use crate::session::SessionManager;
 use std::any::Any;
 use std::collections::HashMap;
@@ -110,9 +110,9 @@ impl CommandRegistry {
     }
 
     // Execute a command with proper routing
-    pub async fn execute(&self, context: &mut CommandContext, command_line: &str) -> CommandResult {
+    pub async fn execute(&self, context: &mut CommandContext, command_request: CommandRequest) -> CommandResult {
         // Parse the command
-        let parts: Vec<&str> = command_line.split_whitespace().collect();
+        let parts: Vec<&str> = command_request.command_line.split_whitespace().collect();
         if parts.is_empty() {
             return Err(CommandError::InvalidArguments(
                 "No command specified".into(),
@@ -121,29 +121,44 @@ impl CommandRegistry {
 
         let command_name = parts[0];
 
-        // First check server commands
-        if let Some(command) = self.get_server_command(command_name) {
-            return self.execute_command(command, context, command_line).await;
+        // Check if we have a session_id to determine command type
+        if let Some(session_id) = command_request.session_id {
+            // Execute implant command on a specific session
+            if let Some(command) = self.get_implant_command(command_name) {
+                // Verify the session exists
+                let session_exists = {
+                    let session_manager = context.session_manager.read().unwrap();
+                    session_manager.get_session(&session_id).is_some()
+                };
+                
+                if !session_exists {
+                    return Err(CommandError::TargetNotFound(format!(
+                        "Session with ID '{}' not found",
+                        session_id
+                    )));
+                }
+                
+                return self.execute_implant_command(command, context, command_request.command_line.as_str(), session_id).await;
+            } else {
+                return Err(CommandError::TargetNotFound(format!(
+                    "Implant command '{}' not found",
+                    command_name
+                )));
+            }
+        } else {
+            // No session_id, so it's a server command
+            if let Some(command) = self.get_server_command(command_name) {
+                return self.execute_server_command(command, context, command_request.command_line.as_str()).await;
+            } else {
+                return Err(CommandError::TargetNotFound(format!(
+                    "Server command '{}' not found",
+                    command_name
+                )));
+            }
         }
-
-        // If there's an active session, check implant commands
-        // let session_manager = context.session_manager.read().unwrap();
-        // if !session_manager.get_all_sessions().is_empty() {
-        //     if let Some(command) = self.get_implant_command(command_name) {
-        //         return self
-        //             .execute_implant_command(command, context, command_line)
-        //             .await;
-        //     }
-        // }
-
-        // Command not found
-        Err(CommandError::TargetNotFound(format!(
-            "Command '{}' not found",
-            command_name
-        )))
     }
 
-    async fn execute_command(
+    async fn execute_server_command(
         &self,
         command: &Box<dyn RbCommand>,
         context: &mut CommandContext,
@@ -169,22 +184,30 @@ impl CommandRegistry {
         command: &Box<dyn RbCommand>,
         context: &mut CommandContext,
         command_line: &str,
+        session_id: usize,
     ) -> CommandResult {
-        // Parse arguments first
+        // Parse arguments with clap
         let args_result = command.parse_args(command_line);
 
         match args_result {
             Ok(parsed_args) => {
-                // if let Some(session_arc) = &context.active_session {
-                //     let mut session = session_arc.lock().map_err(|_| {
-                //         CommandError::Internal("Failed to lock active session".into())
-                //     })?;
-                //
-                //     // Send the command to the implant through the session
-                //     return session.send_command(command.name(), command_line).await;
-                // }
-
-                Err(CommandError::NoActiveSession("No active session".into()))
+                // Get the session
+                let session = {
+                    let session_manager = context.session_manager.read().unwrap();
+                    match session_manager.get_session(&session_id) {
+                        Some(s) => s,
+                        None => return Err(CommandError::TargetNotFound(format!(
+                            "Session with ID '{}' not found",
+                            session_id
+                        ))),
+                    }
+                };
+                
+                // Here you would implement the logic to send the command to the implant
+                // through the session and wait for a response
+                
+                // For now, we'll just execute it directly
+                command.execute_with_parsed_args(context, parsed_args)
             }
             Err(err) => Err(CommandError::InvalidArguments(format!(
                 "Failed to parse arguments: {}",

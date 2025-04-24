@@ -16,7 +16,7 @@ use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use uuid::Uuid;
 
 use rb::command::CommandRegistry;
-use rb::message::CommandResult;
+use rb::message::{CommandRequest, CommandResult};
 use rb::session::SessionManager;
 
 pub struct RbServer {
@@ -343,8 +343,6 @@ impl RbServer {
         mut client: Client,
         client_id: Uuid,
         clients: Arc<Mutex<Vec<Client>>>,
-        // sessions: Arc<Mutex<Vec<Session>>>,
-        // sessions: Arc<std::sync::RwLock<HashMap<Uuid, Arc<Session>>>>,
         session_manager: Arc<RwLock<SessionManager>>,
         listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
         running: Arc<AtomicBool>,
@@ -353,20 +351,14 @@ impl RbServer {
         log::debug!("Handling client: {}", client.addr());
 
         // Extract the TCP stream first
-        log::info!("Before we take the TCP stream");
         let mut tcp_stream = client.take_tcp().unwrap();
-        log::info!("After we take the TCP stream");
 
         // Then split it to avoid ownership issues
         let (reader, writer) = tcp_stream.split();
-        log::info!("After we split the TCP stream");
 
         let mut stream = FramedRead::new(reader, LinesCodec::new());
-        log::debug!("After FramedRead");
-        log::debug!("{:?}", stream);
 
         let mut sink = FramedWrite::new(writer, LinesCodec::new());
-        log::debug!("After FramedWrite");
 
         // Maybe will add this later for the client to have autocomplete features
         // let commands: Vec<String> = command_registry
@@ -392,8 +384,25 @@ impl RbServer {
                     command_registry: command_registry.clone(),
                     listeners: listeners.clone(),
                 };
+
+                let command_request: CommandRequest = match serde_json::from_str(msg.as_str()) {
+                    Ok(request) => request,
+                    Err(e) => {
+                        log::error!("Failed to parse command request: {}", e);
+                        let error_response = format!(
+                            "{{\"error\": \"Failed to parse command request: {}\"}}",
+                            e
+                        );
+                        if let Err(e) = sink.send(error_response).await {
+                            log::error!("Failed to send error response to client: {}", e);
+                            break;
+                        }
+                        continue;
+                    }
+                };
+
                 let result: CommandResult = command_registry
-                    .execute(&mut cmd_context, msg.as_str())
+                    .execute(&mut cmd_context, command_request)
                     .await;
 
                 // Serialize the result
