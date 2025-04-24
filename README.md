@@ -8,14 +8,16 @@ RustBucket
 
 ## rb_client
 
-- [ ] Add session interaction prompt.
-- [ ] Ability to interact with a session (starts sending the session id along with the command to the server).
+- [x] Add session interaction prompt.
+- [x] Ability to interact with a session (starts sending the session id along with the command to the server).
 
 ## Executing implant commands workflow
 
-1. The server recieves a command from the client (ex. `ls`) which also includes the session id.
-2. Server parses command and executes it (determining which command it is is done by the command registry automatically).
-3. Execution function of the command should grab the seesion using the session id from the `CommandContext` and add a task to the session.
+1. ~~The server recieves a command from the client (ex. `ls`) which also includes the session id.~~
+2. ~~Server parses command and executes it (determining which command it is is done by the command registry automatically).~~
+3. ~~Execution function of the command should grab the seesion using the session id from the `CommandContext` and add a task to the session.~~
+
+This is done.
 
 ## rb_implant
 
