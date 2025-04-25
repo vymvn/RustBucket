@@ -220,7 +220,13 @@ impl HttpListener {
 
                     // Mark tasks as in progress
                     for task in &pending_tasks {
-                        session.update_task_status(&task.id, crate::task::TaskStatus::InProgress);
+                        match session.update_task_status(&task.id, crate::task::TaskStatus::InProgress) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                log::error!("Error updating task status: {}", e);
+                                return HttpResponse::InternalServerError().body("Error updating task status");
+                            }
+                        }
                     }
 
                     HttpResponse::Ok().json(pending_tasks)
