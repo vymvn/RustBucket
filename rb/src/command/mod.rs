@@ -9,8 +9,6 @@ use std::sync::Arc;
 use std::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
-use crate::task::TaskStatus;
-
 use clap;
 
 mod implant_cmds;
@@ -227,26 +225,28 @@ impl CommandRegistry {
                 //
                 let args = Vec::<String>::new();
 
-                let task_id = match session.create_task(command.name().to_string(), args) {
-                    Ok(id) => id,
+                if match session.create_task(command.name().to_string(), args) {
+                    Ok(_) => true,
                     Err(err) => {
                         return Err(CommandError::TargetNotFound(format!(
                             "Failed to create task: {}",
                             err
                         )))
                     }
-                };
-                let timeout = 10; // seconds
-                let start_time = std::time::Instant::now();
-                while session.get_task(&task_id).unwrap().status != TaskStatus::Completed {
-                    if start_time.elapsed().as_secs() > timeout {
-                        return Err(CommandError::Timeout(format!(
-                            "Task with ID '{}' timed out",
-                            task_id
-                        )));
-                    }
+                } {
+                    // Execute command with the parsed arguments
+                    // command.execute_with_parsed_args(context, parsed_args)
+                    Ok(CommandOutput::Text(format!(
+                        "Tasked implant {} with '{}'",
+                        session.implant_hostname(),
+                        command.name(),
+                    )))
+                } else {
+                    Err(CommandError::TargetNotFound(format!(
+                        "Failed to create task for session with ID '{}'",
+                        session_id
+                    )))
                 }
-                    return Ok(session.get_task_result(&task_id).unwrap().output)
             }
             Err(err) => Err(CommandError::InvalidArguments(format!(
                 "Failed to parse arguments: {}",

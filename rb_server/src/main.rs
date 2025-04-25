@@ -29,15 +29,7 @@ async fn main() {
     let c2 = server::RbServer::new(conf);
 
     // Start C2 server
-    match c2.start().await {
-        Ok(_) => {
-            log::info!("C2 server started successfully");
-        }
-        Err(err) => {
-            log::error!("Error starting C2 server: {}", err);
-            return;
-        }
-    }
+    c2.start().await.expect("mrrp");
 
     // Wait for Ctrl+C
     match signal::ctrl_c().await {
@@ -45,19 +37,12 @@ async fn main() {
             log::info!("\nReceived Ctrl+C, shutting down gracefully...");
         }
         Err(err) => {
-            log::error!("Error setting up Ctrl+C handler: {}", err);
+            eprintln!("Error setting up Ctrl+C handler: {}", err);
         }
     }
 
     // Stop C2 server
-    match c2.stop().await {
-        Ok(_) => {
-            log::info!("C2 server stopped successfully");
-        }
-        Err(err) => {
-            log::error!("Error stopping C2 server: {}", err);
-        }
-    }
+    c2.stop().await.expect("meow");
 
     log::info!("All services stopped successfully");
 }

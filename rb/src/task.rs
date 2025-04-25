@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 use uuid::Uuid;
-use crate::message::CommandOutput;
 
 /// Status of a task
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -63,7 +62,7 @@ pub struct TaskResult {
     pub session_id: usize,
 
     /// Output from the command
-    pub output: CommandOutput,
+    pub output: String,
 
     /// Error output, if any
     pub error: Option<String>,
@@ -490,7 +489,7 @@ pub struct TaskResultResponse {
     pub task_id: Uuid,
 
     /// Output
-    pub output: CommandOutput,
+    pub output: String,
 
     /// Error (if any)
     pub error: Option<String>,
