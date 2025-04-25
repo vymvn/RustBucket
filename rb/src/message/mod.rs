@@ -85,23 +85,28 @@ pub struct ImplantCheckin {
     pub process_id: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Task {
-    pub id: Uuid,
+#[derive(Debug, Deserialize)]
+pub struct CheckinResponse {
     pub implant_id: Uuid,
-    pub command: String,
-    pub args: Vec<String>,
-    pub created_at: SystemTime,
-    pub status: TaskStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TaskStatus {
-    Pending,
-    InProgress,
-    Completed,
-    Failed,
-}
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct Task {
+//     pub id: Uuid,
+//     pub implant_id: Uuid,
+//     pub command: String,
+//     pub args: Vec<String>,
+//     pub created_at: SystemTime,
+//     pub status: TaskStatus,
+// }
+
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub enum TaskStatus {
+//     Pending,
+//     InProgress,
+//     Completed,
+//     Failed,
+// }
 
 // #[derive(Debug, Clone, Serialize, Deserialize)]
 // pub struct TaskResult {

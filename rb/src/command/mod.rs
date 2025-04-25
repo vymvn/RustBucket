@@ -218,10 +218,12 @@ impl CommandRegistry {
                     }
                 };
 
-                let args = match parsed_args.downcast::<Vec<String>>() {
-                    Ok(args) => *args,
-                    Err(_) => return Err(CommandError::Internal("Invalid arguments type".into())),
-                };
+                // let args = match parsed_args.downcast::<Vec<String>>() {
+                //     Ok(args) => *args,
+                //     Err(_) => return Err(CommandError::Internal("Invalid arguments type".into())),
+                // };
+                //
+                let args = Vec::<String>::new();
 
                 if match session.create_task(command.name().to_string(), args) {
                     Ok(_) => true,

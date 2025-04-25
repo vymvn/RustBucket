@@ -75,9 +75,8 @@ pub struct TaskResult {
 
     /// When the result was created
     pub completed_at: SystemTime,
-
-    /// Execution time in milliseconds
-    pub execution_time_ms: u64,
+    // /// Execution time in milliseconds
+    // pub execution_time_ms: u64,
 }
 
 // /// TaskManager handles task operations across sessions
@@ -503,9 +502,8 @@ pub struct TaskResultResponse {
 
     /// Completed timestamp (ISO format)
     pub completed_at: String,
-
-    /// Execution time in milliseconds
-    pub execution_time_ms: u64,
+    // /// Execution time in milliseconds
+    // pub execution_time_ms: u64,
 }
 
 impl From<TaskResult> for TaskResultResponse {
@@ -526,7 +524,7 @@ impl From<TaskResult> for TaskResultResponse {
             status: result.status.to_string(),
             status_code: result.status_code,
             completed_at,
-            execution_time_ms: result.execution_time_ms,
+            // execution_time_ms: result.execution_time_ms,
         }
     }
 }

