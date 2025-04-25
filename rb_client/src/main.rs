@@ -143,6 +143,9 @@ fn display_command_error(error: &CommandError) {
         CommandError::Internal(msg) => {
             eprintln!("{}: {}", "Internal Error".bright_red().bold(), msg);
         }
+        CommandError::Timeout(msg) => {
+            eprintln!("{}: {}", "Timeout".bright_red().bold(), msg);
+        }
     }
 }
 
