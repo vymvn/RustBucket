@@ -1,4 +1,6 @@
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::net::TcpStream;
 use uuid::Uuid;
 
@@ -7,6 +9,7 @@ pub struct Client {
     pub id: Uuid,
     // username: String, // To be added when authentication is implemented
     pub tcp: Option<TcpStream>,
+    pub should_disconnect: Arc<AtomicBool>, // New field to signal disconnection
 }
 
 impl Client {
@@ -21,6 +24,7 @@ impl Client {
             addr,
             id,
             tcp: Some(stream),
+            should_disconnect: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -35,6 +39,16 @@ impl Client {
     pub fn take_tcp(&mut self) -> Option<TcpStream> {
         self.tcp.take()
     }
+
+    // New method to check if client should disconnect
+    pub fn should_disconnect(&self) -> bool {
+        self.should_disconnect.load(Ordering::SeqCst)
+    }
+
+    // New method to signal client to disconnect
+    pub fn signal_disconnect(&self) {
+        self.should_disconnect.store(true, Ordering::SeqCst);
+    }
 }
 
 impl fmt::Debug for Client {
@@ -43,6 +57,7 @@ impl fmt::Debug for Client {
             .field("id", &self.id)
             .field("addr", &self.addr)
             .field("has_tcp", &self.tcp.is_some())
+            .field("should_disconnect", &self.should_disconnect())
             .finish()
     }
 }
@@ -54,6 +69,7 @@ impl Clone for Client {
             addr: self.addr.clone(),
             id: self.id,
             tcp: None,
+            should_disconnect: self.should_disconnect.clone(), // Clone the Arc
         }
     }
 }

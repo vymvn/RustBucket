@@ -11,7 +11,7 @@ use tokio::signal;
 #[tokio::main]
 async fn main() {
     // Initialize the logger
-    simple_logger::SimpleLogger::new().env().init().unwrap();
+    simple_logger::SimpleLogger::new().with_level(log::LevelFilter::Info).init().unwrap();
 
     // Create mTLS configuration
     let mtls_config = config::MtlsConfig::new(

@@ -1,25 +1,37 @@
-pub mod http_listener;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
+use crate::message::*;
 
-/// Trait defining the common interface for all listener types
+pub mod http_listener;
+
+/// Trait defining the interface for all listener types
 pub trait Listener: Send + Sync {
-    /// Returns the unique identifier for this listener
-    fn id(&self) -> Uuid;
-
-    /// Returns the name of this listener
+    /// Get the name of this listener
     fn name(&self) -> &str;
-
-    /// Returns the socket address this listener is bound to
+    
+    /// Get the unique ID of this listener
+    fn id(&self) -> Uuid;
+    
+    /// Get the socket address this listener is bound to
     fn addr(&self) -> SocketAddr;
-
-    /// Checks if the listener is currently running
+    
+    /// Start the listener
+    async fn start(&mut self) -> Result<(), String>;
+    
+    /// Stop the listener
+    async fn stop(&mut self) -> Result<(), String>;
+    
+    /// Check if the listener is currently running
     fn is_running(&self) -> bool;
-
-    /// Starts the listener
-    fn start(&mut self) -> Result<(), String>;
-
-    /// Stops the listener
-    fn stop(&mut self) -> Result<(), String>;
+    
+    /// Get the count of implants connected to this listener
+    fn implant_count(&self) -> usize;
+    
+    /// Get information about all implants connected to this listener
+    fn get_implants(&self) -> Vec<ImplantInfo>;
+    
+    /// Type of the listener for display purposes
+    fn listener_type(&self) -> &str;
 }
+

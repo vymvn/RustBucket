@@ -5,11 +5,11 @@ RustBucket
 
 ## rb_server
 - [ ] implement a `ListenerManager` similar to `SessionManager` that will handle the listeners.
-- [ ] Generate payload command
+- [x] Generate payload command
 
 ## rb_client
 
-- [ ] actually print the tasks executed by agent
+- [x] actually print the tasks executed by agent
 
 ## rb_implant
 

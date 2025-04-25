@@ -63,19 +63,7 @@ impl RbCommand for ServerListenersCommand {
                         .help("Listener ID to stop")
                         .required(true),
                 ),
-            );
-
-        // Get the arguments part (skip the command name)
-        // let args_str = command_line
-        //     .trim_start()
-        //     .strip_prefix(self.name())
-        //     .unwrap_or("")
-        //     .trim_start();
-        //
-        // // Parse the arguments
-        // let matches = cmd.try_get_matches_from(
-        //     std::iter::once(self.name()).chain(args_str.split_whitespace()),
-        // )?;
+            ).arg_required_else_help(true);
 
         let matches = get_arg_matches(&cmd, command_line)?;
 
@@ -322,8 +310,7 @@ impl RbCommand for ServerListenersCommand {
                         Ok(CommandOutput::Text("meowmeow".to_string()))
                     }
                     _ => Err(CommandError::ExecutionFailed(format!(
-                        "Unknown action: {}",
-                        args.action
+                        "No arguments provided",
                     ))),
                 }
             }

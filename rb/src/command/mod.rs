@@ -187,9 +187,9 @@ impl CommandRegistry {
                 // Execute command with the parsed arguments
                 command.execute_with_parsed_args(context, parsed_args)
             }
-            Err(err) => Err(CommandError::InvalidArguments(format!(
-                "Failed to parse arguments: {}",
-                err
+            Err(e) => Err(CommandError::InvalidArguments(format!(
+                "Failed to parse arguments\n\n{}",
+                e,
             ))),
         }
     }
@@ -220,11 +220,13 @@ impl CommandRegistry {
                     }
                 };
 
-                // let args = match parsed_args.downcast::<Vec<String>>() {
-                //     Ok(args) => *args,
-                //     Err(_) => return Err(CommandError::Internal("Invalid arguments type".into())),
-                // };
-                //
+                let test_args = match parsed_args.downcast::<Vec<String>>() {
+                    Ok(args) => *args,
+                    Err(_) => return Err(CommandError::Internal("Invalid arguments type".into())),
+                };
+
+                dbg!(&test_args);
+
                 let args = Vec::<String>::new();
 
                 let task_id = match session.create_task(command.name().to_string(), args) {
@@ -249,7 +251,7 @@ impl CommandRegistry {
                     return Ok(session.get_task_result(&task_id).unwrap().output)
             }
             Err(err) => Err(CommandError::InvalidArguments(format!(
-                "Failed to parse arguments: {}",
+                "Failed to parse arguments\n\n{}",
                 err
             ))),
         }

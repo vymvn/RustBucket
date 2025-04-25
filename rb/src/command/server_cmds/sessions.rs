@@ -42,7 +42,8 @@ impl RbCommand for ServerSessionsCommand {
                         .help("The ID of the session to attach to")
                         .required(true),
                 ),
-            );
+            )
+            .arg_required_else_help(true);
 
         let matches = get_arg_matches(&cmd, command_line)?;
 

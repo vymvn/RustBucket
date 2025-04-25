@@ -162,7 +162,7 @@ impl ServerHelpCommand {
                         .about("manage sessions")
                         .subcommand(clap::Command::new("list").about("List all active sessions"))
                         .subcommand(
-                            clap::Command::new("interact")
+                            clap::Command::new("use")
                                 .about("Interact with a session")
                                 .arg(
                                     clap::Arg::new("id")

@@ -275,7 +275,7 @@ impl HttpListener {
 
                 // Run the server
                 if let Err(e) = server.run().await {
-                    eprintln!("Server error: {}", e);
+                    log::error!("Failed to start listener: {}", e);
                 }
             });
 

@@ -14,6 +14,7 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use uuid::Uuid;
+use dashmap::DashMap;
 
 use rb::command::CommandRegistry;
 use rb::message::{CommandRequest, CommandResult};
@@ -21,7 +22,8 @@ use rb::session::SessionManager;
 
 pub struct RbServer {
     config: RbServerConfig,
-    clients: Arc<Mutex<Vec<Client>>>,
+    clients: Arc<DashMap<Uuid, Client>>,
+    client_handlers: Arc<Mutex<Vec<JoinHandle<()>>>>,
     // listeners: Arc<Mutex<Vec<Box<dyn Listener>>>>,
     // listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<dyn Listener>>>>>>,
     listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
@@ -38,7 +40,9 @@ impl RbServer {
     pub fn new(config: RbServerConfig) -> Self {
         RbServer {
             config,
-            clients: Arc::new(Mutex::new(Vec::new())),
+            // clients: Arc::new(Mutex::new(Vec::new())),
+            clients: Arc::new(DashMap::new()),
+            client_handlers: Arc::new(Mutex::new(Vec::new())),
             listeners: Arc::new(Mutex::new(HashMap::new())),
             // sessions: Arc::new(std::sync::RwLock::new(HashMap::new())),
             session_manager: Arc::new(RwLock::new(SessionManager::new())),
@@ -81,24 +85,24 @@ impl RbServer {
 
         let running = self.running.clone();
         let clients = self.clients.clone();
-        // let sessions = self.sessions.clone();
         let session_manager = self.session_manager.clone();
         let command_registry = self.command_registry.clone();
         let listeners = self.listeners.clone();
+        let client_handlers = self.client_handlers.clone();
 
         let handle = tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
-                match listener.accept().await {
-                    Ok((socket, addr)) => {
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(1), // Check running flag every second
+                    listener.accept()
+                ).await {
+                    Ok(Ok((socket, addr))) => {
                         log::info!("New connection from: {}", addr);
 
                         let client = Client::new(socket);
                         let client_id = client.id();
 
-                        {
-                            let mut client_list = clients.lock().unwrap();
-                            client_list.push(client.clone());
-                        }
+                        clients.insert(client_id, client.clone());
 
                         let client_list = clients.clone();
                         let session_manager = session_manager.clone();
@@ -106,7 +110,8 @@ impl RbServer {
                         let command_registry_clone = command_registry.clone();
                         let listeners_clone = listeners.clone();
 
-                        tokio::spawn(async move {
+                        // Spawn and store the client handler
+                        let handler = tokio::spawn(async move {
                             if let Err(e) = Self::handle_client(
                                 client,
                                 client_id,
@@ -121,9 +126,17 @@ impl RbServer {
                                 eprintln!("Error handling client {}: {}", addr, e);
                             }
                         });
+
+                        // Store the handler reference
+                        let mut handlers = client_handlers.lock().unwrap();
+                        handlers.push(handler);
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         eprintln!("Error accepting connection: {}", e);
+                    }
+                    Err(_) => {
+                        // Timeout occurred, just continue to check the running flag
+                        continue;
                     }
                 }
             }
@@ -183,8 +196,7 @@ impl RbServer {
                         let crl_path = crl_path.clone();
 
                         // Process the TLS handshake in a separate task
-                        let client_list = clients.clone();
-                        // let session_list = sessions.clone();
+                        let clients_clone = clients.clone();
                         let session_manager = session_manager.clone();
                         let running_clone = running.clone();
                         let command_registry_clone = command_registry.clone();
@@ -265,15 +277,12 @@ impl RbServer {
                             let client = Client::new(stream);
                             let client_id = client.id();
 
-                            {
-                                let mut client_list = client_list.lock().unwrap();
-                                client_list.push(client.clone());
-                            }
+                            clients_clone.insert(client_id, client.clone());
 
                             if let Err(e) = Self::handle_client(
                                 client,
                                 client_id,
-                                client_list,
+                                clients_clone,
                                 session_manager,
                                 listeners_clone,
                                 running_clone,
@@ -299,55 +308,11 @@ impl RbServer {
     }
 
     /// Stop the C2 server
-    pub async fn stop(&self) -> io::Result<()> {
-        if !self.running.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-
-        // Set running flag to false to stop the accept loop
-        self.running.store(false, Ordering::SeqCst);
-
-        // Wait for the server task to complete
-        if let Some(handle) = self.server_task.lock().unwrap().take() {
-            // It's generally a good idea to have a timeout here
-            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
-                Ok(_) => log::info!("Server shutdown completed"),
-                Err(_) => {
-                    log::error!("Server shutdown timed out");
-                    // You might want to abort the task or take additional actions
-                }
-            }
-        }
-
-        // Clean up any remaining clients
-        let mut clients = self.clients.lock().unwrap();
-        clients.clear();
-
-        // Clean up any remaining sessions
-        let session_manager = self.session_manager.write().unwrap();
-        session_manager.kill_all_sessions();
-
-        Ok(())
-    }
-
-    // /// Add a listener to the server
-    // pub fn add_listener(&self, listener: Box<HttpListener>) -> Uuid {
-    //     let uuid = Uuid::new_v4(); // Generate a new UUID for this listener
-    //     let mut listeners = self.listeners.lock().unwrap();
-    //     listeners.insert(uuid, Arc::new(Mutex::new(listener)));
-    //     uuid // Return the UUID so the caller can reference this listener later
-    // }
-    //
-    // /// Get the current number of connected clients
-    // pub fn client_count(&self) -> usize {
-    //     self.clients.lock().unwrap().len()
-    // }
-
-    /// Handle an individual client connection
     async fn handle_client(
         mut client: Client,
         client_id: Uuid,
-        clients: Arc<Mutex<Vec<Client>>>,
+        // clients: Arc<Mutex<Vec<Client>>>,
+        clients: Arc<DashMap<Uuid, Client>>,
         session_manager: Arc<RwLock<SessionManager>>,
         listeners: Arc<Mutex<HashMap<Uuid, Arc<Mutex<Box<HttpListener>>>>>>,
         running: Arc<AtomicBool>,
@@ -362,85 +327,149 @@ impl RbServer {
         let (reader, writer) = tcp_stream.split();
 
         let mut stream = FramedRead::new(reader, LinesCodec::new());
-
         let mut sink = FramedWrite::new(writer, LinesCodec::new());
 
-        // Maybe will add this later for the client to have autocomplete features
-        // let commands: Vec<String> = command_registry
-        //     .list()
-        //     .iter()
-        //     .map(|cmd| cmd.name.clone())
-        //     .collect();
-        //
-        // let serialized_cmds = serde_json::to_string(&commands).unwrap();
-        //
-        // // Send the serialized result to the client
-        // if let Err(e) = sink.send(serialized_cmds).await {
-        //     log::error!("Failed to send commands to client: {}", e);
-        // }
+        // Create check interval for shutdown signal
+        let mut shutdown_check = tokio::time::interval(std::time::Duration::from_millis(100));
 
-        log::info!("Running: {:?}", running);
-        while running.load(Ordering::SeqCst) {
-            while let Some(Ok(msg)) = stream.next().await {
-                log::info!("Received: {:?}", msg);
-                let mut cmd_context = CommandContext {
-                    session_manager: session_manager.clone(),
-                    // active_session: client.active_session.clone(),
-                    command_registry: command_registry.clone(),
-                    listeners: listeners.clone(),
-                };
-
-                let command_request: CommandRequest = match serde_json::from_str(msg.as_str()) {
-                    Ok(request) => request,
-                    Err(e) => {
-                        log::error!("Failed to parse command request: {}", e);
-                        let error_response =
-                            format!("{{\"error\": \"Failed to parse command request: {}\"}}", e);
-                        if let Err(e) = sink.send(error_response).await {
-                            log::error!("Failed to send error response to client: {}", e);
-                            break;
-                        }
-                        continue;
-                    }
-                };
-
-                let result: CommandResult = command_registry
-                    .execute(&mut cmd_context, command_request)
-                    .await;
-
-                // Serialize the result
-                let serialized = match result {
-                    Ok(output) => {
-                        // Serialize the output
-                        serde_json::to_string(&output).unwrap_or_else(|e| {
-                            format!("{{\"error\": \"Failed to serialize output: {}\"}}", e)
-                        })
-                    }
-                    Err(err) => {
-                        // Serialize the error
-                        serde_json::to_string(&err).unwrap_or_else(|e| {
-                            format!("{{\"error\": \"Failed to serialize error: {}\"}}", e)
-                        })
-                    }
-                };
-
-                // Send the serialized result to the client
-                if let Err(e) = sink.send(serialized).await {
-                    log::error!("Failed to send response to client: {}", e);
-                    break;
+        while running.load(Ordering::SeqCst) && !client.should_disconnect() {
+            tokio::select! {
+                _ = shutdown_check.tick() => {
+                    // Just check the conditions in the while loop
                 }
+                Some(Ok(msg)) = stream.next() => {
+                    log::info!("Received: {:?}", msg);
+                    let mut cmd_context = CommandContext {
+                        session_manager: session_manager.clone(),
+                        command_registry: command_registry.clone(),
+                        listeners: listeners.clone(),
+                    };
 
-                // Log the command execution
-                log::debug!("Executed command: {}", msg);
+                    let command_request: CommandRequest = match serde_json::from_str(msg.as_str()) {
+                        Ok(request) => request,
+                        Err(e) => {
+                            log::error!("Failed to parse command request: {}", e);
+                            let error_response =
+                                format!("{{\"error\": \"Failed to parse command request: {}\"}}", e);
+                            if let Err(e) = sink.send(error_response).await {
+                                log::error!("Failed to send error response to client: {}", e);
+                                break;
+                            }
+                            continue;
+                        }
+                    };
+
+                    let result: CommandResult = command_registry
+                        .execute(&mut cmd_context, command_request)
+                        .await;
+
+                    // Serialize the result
+                    let serialized = match result {
+                        Ok(output) => {
+                            serde_json::to_string(&output).unwrap_or_else(|e| {
+                                format!("{{\"error\": \"Failed to serialize output: {}\"}}", e)
+                            })
+                        }
+                        Err(err) => {
+                            serde_json::to_string(&err).unwrap_or_else(|e| {
+                                format!("{{\"error\": \"Failed to serialize error: {}\"}}", e)
+                            })
+                        }
+                    };
+
+                    // Send the serialized result to the client
+                    if let Err(e) = sink.send(serialized).await {
+                        log::error!("Failed to send response to client: {}", e);
+                        break;
+                    }
+
+                    log::debug!("Executed command: {}", msg);
+                }
+                else => break,
             }
         }
 
-        // Clean up when the client disconnects
-        {
-            let mut client_list = clients.lock().unwrap();
-            client_list.retain(|c| c.id() != client_id);
+        // Log the disconnect reason
+        if !running.load(Ordering::SeqCst) {
+            log::info!("Client {} disconnected due to server shutdown", client_id);
+        } else if client.should_disconnect() {
+            log::info!("Client {} disconnected due to disconnect signal", client_id);
+        } else {
+            log::info!("Client {} disconnected", client_id);
         }
 
+        // Clean up when the client disconnects
+        clients.remove(&client_id);
+        // {
+        //     let mut client_list = clients.lock().unwrap();
+        //     client_list.retain(|c| c.id() != client_id);
+        // }
+
+        Ok(())
+    }
+
+    // Modified stop method to properly clean up client handlers
+    pub async fn stop(&self) -> io::Result<()> {
+        if !self.running.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        log::info!("Stopping server...");
+
+        // Set running flag to false to stop the accept loop
+        self.running.store(false, Ordering::SeqCst);
+
+        // Signal all clients to disconnect
+        {
+            // let clients = self.clients.lock().unwrap();
+            for client in self.clients.iter() {
+                client.signal_disconnect();
+            }
+            log::info!("Signaled {} clients to disconnect", self.clients.len());
+        }
+
+        // Wait for the server task to complete with timeout
+        if let Some(handle) = self.server_task.lock().unwrap().take() {
+            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
+                Ok(_) => log::info!("Server main task completed"),
+                Err(_) => {
+                    log::warn!("Server main task shutdown timed out");
+                    // No need to abort - it will be dropped when the process exits
+                }
+            }
+        }
+
+        // Wait for all client handlers to complete
+        {
+            let mut handlers = self.client_handlers.lock().unwrap();
+            let handler_count = handlers.len();
+            log::info!("Waiting for {} client handlers to complete", handler_count);
+            
+            let mut completed = 0;
+            let mut timed_out = 0;
+            
+            for handle in handlers.drain(..) {
+                match tokio::time::timeout(std::time::Duration::from_secs(2), handle).await {
+                    Ok(_) => completed += 1,
+                    Err(_) => {
+                        log::warn!("Client handler shutdown timed out");
+                        timed_out += 1;
+                    }
+                }
+            }
+            
+            log::info!("Client handlers: {} completed, {} timed out", completed, timed_out);
+        }
+
+        // Clean up any remaining clients
+        // let mut clients = self.clients.lock().unwrap();
+        self.clients.clear();
+
+        // Clean up any remaining sessions
+        let session_manager = self.session_manager.write().unwrap();
+        session_manager.kill_all_sessions();
+
+        log::info!("Server stopped successfully");
         Ok(())
     }
 
