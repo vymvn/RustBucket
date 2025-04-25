@@ -38,8 +38,11 @@ pub struct Task {
     /// Session ID for this task
     pub session_id: usize,
 
-    /// Action to do
-    pub action: String,
+    /// Command to execute to do
+    pub command: String,
+
+    /// Arguments for the command
+    pub args: Vec<String>,
 
     /// When the task was created
     pub created_at: SystemTime,
@@ -447,8 +450,11 @@ pub struct TaskResponse {
     /// implant ID
     pub implant_id: Uuid,
 
-    /// Action
-    pub action: String,
+    /// Command
+    pub command: String,
+
+    /// Command arguments
+    pub args: Vec<String>,
 
     /// Status
     pub status: String,
@@ -471,7 +477,8 @@ impl From<Task> for TaskResponse {
         Self {
             id: task.id,
             implant_id: task.implant_id,
-            action: task.action,
+            command: task.command,
+            args: task.args,
             status: task.status.to_string(),
             created_at,
         }

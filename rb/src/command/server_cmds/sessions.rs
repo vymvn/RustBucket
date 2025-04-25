@@ -39,13 +39,11 @@ impl RbCommand for ServerSessionsCommand {
                 ),
             )
             .subcommand(
-                clap::Command::new("attach")
-                    .about("Attach to a session")
-                    .arg(
-                        clap::Arg::new("id")
-                            .help("The ID of the session to attach to")
-                            .required(true),
-                    ),
+                clap::Command::new("use").about("Attach to a session").arg(
+                    clap::Arg::new("id")
+                        .help("The ID of the session to attach to")
+                        .required(true),
+                ),
             );
 
         let matches = get_arg_matches(&cmd, command_line)?;
@@ -61,8 +59,8 @@ impl RbCommand for ServerSessionsCommand {
         } else if let Some(sub_matches) = matches.subcommand_matches("kill") {
             args.action = "kill".to_string();
             args.id = sub_matches.get_one::<String>("id").cloned();
-        } else if let Some(sub_matches) = matches.subcommand_matches("attach") {
-            args.action = "attach".to_string();
+        } else if let Some(sub_matches) = matches.subcommand_matches("use") {
+            args.action = "use".to_string();
             args.id = sub_matches.get_one::<String>("id").cloned();
         }
 
@@ -81,7 +79,6 @@ impl RbCommand for ServerSessionsCommand {
                 match args.action.as_str() {
                     "list" => {
                         // Get all active sessions from context
-                        // let sessions = context.sessions.clone();
                         let session_manager = context.session_manager.clone();
                         let handle = session_manager.read().unwrap();
 
@@ -152,7 +149,8 @@ impl RbCommand for ServerSessionsCommand {
                             ))),
                         }
                     }
-                    "attach" => {
+                    // This code is never even called lmao it does nothing
+                    "use" => {
                         // Validate required parameters
                         let id_str = match &args.id {
                             Some(id) => id,

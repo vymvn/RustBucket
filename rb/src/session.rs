@@ -153,14 +153,15 @@ impl Session {
     }
 
     /// Create a new task for a session
-    pub fn create_task(&self, action: String) -> Result<Uuid, String> {
+    pub fn create_task(&self, command: String, args: Vec<String>) -> Result<Uuid, String> {
         let task_id = Uuid::new_v4();
 
         let task = Task {
             id: task_id,
             implant_id: self.implant_id,
             session_id: self.id,
-            action,
+            command,
+            args,
             created_at: SystemTime::now(),
             status: TaskStatus::Pending,
         };
