@@ -475,11 +475,11 @@ fn main() -> io::Result<()> {
                 }
 
                 // Check for session management commands
-                if input.starts_with("sessions interact") {
+                if input.starts_with("sessions use") {
                     // Parse session ID
                     let parts: Vec<&str> = input.split_whitespace().collect();
                     if parts.len() < 3 {
-                        eprintln!("{}", "Usage: session interact <session_id>".bright_red());
+                        eprintln!("{}", "Usage: session use <session_id>".bright_red());
                         continue;
                     }
 
