@@ -2,8 +2,6 @@
 use crate::command::*;
 use crate::listener::http_listener::HttpListener;
 use crate::message::*;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tokio::runtime::Runtime;
 
 use super::get_arg_matches;
 use clap;
@@ -211,7 +209,7 @@ impl RbCommand for ServerListenersCommand {
 
                                 // Get the mutex-protected listeners map
                                 let listeners = context.listeners.clone();
-                                let mut listeners_guard = match listeners.lock() {
+                                let listeners_guard = match listeners.lock() {
                                     Ok(guard) => guard,
                                     Err(poisoned) => poisoned.into_inner(), // Handle poisoned mutex
                                 };
@@ -283,7 +281,7 @@ impl RbCommand for ServerListenersCommand {
                         let listeners = context.listeners.clone();
 
                         // Lock the mutex to access the HashMap
-                        let mut listeners_guard = match listeners.lock() {
+                        let listeners_guard = match listeners.lock() {
                             Ok(guard) => guard,
                             Err(poisoned) => poisoned.into_inner(), // Handle poisoned mutex
                         };

@@ -1,7 +1,7 @@
 use crate::listener::http_listener::HttpListener;
 use crate::message::{CommandError, CommandOutput, CommandRequest, CommandResult};
 use crate::session::SessionManager;
-use crate::{listener::*, session};
+use crate::listener::*;
 use std::any::Any;
 use std::collections::HashMap;
 use std::result::Result;

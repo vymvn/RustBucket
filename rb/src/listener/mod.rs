@@ -1,11 +1,7 @@
 pub mod http_listener;
 use std::net::SocketAddr;
-use std::sync::{atomic::AtomicBool, Arc};
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::session::Session;
 
 /// Trait defining the common interface for all listener types
 pub trait Listener: Send + Sync {

@@ -1,7 +1,6 @@
 // TODO: ls implant command
 
 use crate::command::*;
-use crate::message::*;
 
 use clap;
 

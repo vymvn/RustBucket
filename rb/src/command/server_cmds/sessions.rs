@@ -1,7 +1,5 @@
 use crate::command::*;
 use crate::message::*;
-use std::sync::{Arc, RwLock};
-use uuid::Uuid;
 
 use super::get_arg_matches;
 use clap;
