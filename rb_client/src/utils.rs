@@ -2,6 +2,16 @@ use colored::*;
 use rb::message::*;
 use rb::command::*;
 use rb::task::*;
+use serde::{Deserialize, Serialize};
+
+// Represents the result from server
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum ServerResponse {
+    Success(CommandOutput),
+    Error(CommandError),
+}
+
 
 // pub fn display_task_result(result: &TaskResult) {
 //     println!("{}: {}", "Task ID".bright_cyan().bold(), result.task_id);
