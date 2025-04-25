@@ -70,45 +70,7 @@ fn display_command_output(output: &CommandOutput) {
             }
         }
         CommandOutput::Binary(data) => {
-            println!("{}", "Binary data:".bright_green());
-
-            // Display binary data as a hex dump with colors
-            for (i, chunk) in data.chunks(16).enumerate() {
-                // Print offset
-                print!("{:08x}  ", i * 16);
-
-                // Print hex values
-                for (j, byte) in chunk.iter().enumerate() {
-                    if j == 8 {
-                        print!(" "); // Extra space in the middle
-                    }
-                    print!("{:02x} ", byte);
-                }
-
-                // Fill remaining space if chunk is not full
-                for _ in chunk.len()..16 {
-                    print!("   ");
-                }
-
-                // Extra space for alignment
-                if chunk.len() <= 8 {
-                    print!(" ");
-                }
-
-                // Print ASCII representation
-                print!(" │");
-                for &byte in chunk {
-                    if byte >= 32 && byte <= 126 {
-                        // Printable ASCII
-                        print!("{}", (byte as char).to_string().blue());
-                    } else {
-                        // Non-printable
-                        print!("{}", ".".dimmed());
-                    }
-                }
-                println!("│");
-            }
-            println!("\n{} bytes", data.len().to_string().green());
+            println!("Binary data received, size: {} bytes", data.len());
         }
         CommandOutput::None => {
             println!(
@@ -180,11 +142,19 @@ impl Prompt for RustBucketPrompt {
         match (self.active_session, &self.session_info) {
             (Some(id), Some(info)) => {
                 // Session-specific prompt with session info
-                Cow::Owned(format!("{}[{}]> ", "Session".cyan().bold(), info.bright_cyan()))
+                Cow::Owned(format!(
+                    "{}[{}]> ",
+                    "Session".cyan().bold(),
+                    info.bright_cyan()
+                ))
             }
             (Some(id), None) => {
                 // Session-specific prompt with just ID
-                Cow::Owned(format!("{}[{}]> ", "Session".cyan().bold(), id.to_string().bright_cyan()))
+                Cow::Owned(format!(
+                    "{}[{}]> ",
+                    "Session".cyan().bold(),
+                    id.to_string().bright_cyan()
+                ))
             }
             _ => {
                 // Default prompt
@@ -475,22 +445,26 @@ fn main() -> io::Result<()> {
                 }
 
                 // Check for session management commands
-                if input.starts_with("sessions interact") {
+                if input.starts_with("sessions use") {
                     // Parse session ID
                     let parts: Vec<&str> = input.split_whitespace().collect();
                     if parts.len() < 3 {
-                        eprintln!("{}", "Usage: session interact <session_id>".bright_red());
+                        eprintln!("{}", "Usage: session use <session_id>".bright_red());
                         continue;
                     }
 
                     if let Ok(session_id) = parts[2].parse::<usize>() {
                         // Update active session
                         active_session = Some(session_id);
-                        
+
                         // Update prompt
                         prompt.set_session(session_id, format!("Session {}", session_id));
-                        
-                        println!("{} {}", "Interacting with session".green(), session_id.to_string().bright_green());
+
+                        println!(
+                            "{} {}",
+                            "Interacting with session".green(),
+                            session_id.to_string().bright_green()
+                        );
                         continue;
                     } else {
                         eprintln!("{}", "Invalid session ID".bright_red());
@@ -580,9 +554,11 @@ fn main() -> io::Result<()> {
                             }
                             ServerResponse::Error(error) => {
                                 display_command_error(&error);
-                                
+
                                 // If we got a session error and we're in session mode, exit it
-                                if let CommandError::SessionError(_) | CommandError::NoActiveSession(_) = error {
+                                if let CommandError::SessionError(_)
+                                | CommandError::NoActiveSession(_) = error
+                                {
                                     if active_session.is_some() {
                                         active_session = None;
                                         prompt.clear_session();
@@ -621,7 +597,6 @@ fn main() -> io::Result<()> {
                 } else {
                     println!("{}", "Continuing...".green());
                 }
-
             }
         }
     }
