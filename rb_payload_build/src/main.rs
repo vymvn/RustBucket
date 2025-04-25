@@ -8,9 +8,9 @@
     
 
     fn main() -> io::Result<()> {
-        let server = "192.168.1.1";
+        let server = "localhost";
         let port = 8080;
-        let base_url = "http://192.168.1.1:8080";
+        let base_url = "http://localhost:8080";
     
     
     
