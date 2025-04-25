@@ -250,7 +250,6 @@ impl HttpListener {
                         Err(e) => HttpResponse::BadRequest().body(e),
                     }
                 }
-
                 // List all active implants
                 async fn list_implants(data: web::Data<ListenerData>) -> impl Responder {
                     let implants = data.state.implants.lock().unwrap();
@@ -265,7 +264,7 @@ impl HttpListener {
                         .route("/checkin", web::post().to(implant_checkin))
                         .route("/tasks/{implant_id}", web::get().to(get_tasks))
                         .route("/results", web::post().to(upload_results))
-                        // .route("/tasks", web::post().to(create_task))
+                    //    .route("/tasks", web::post().to(create_task))
                         .route("/implants", web::get().to(list_implants))
                 })
                 .bind(server_addr)
