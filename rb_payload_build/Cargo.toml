@@ -1,0 +1,14 @@
+[package]
+name = "rb_payload"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ureq = "2.6.1"
+
+[profile.release]
+opt-level = "z"  # Optimize for size
+lto = true         # Enable Link Time Optimization
+codegen-units = 1  # Reduce parallel code generation units to increase optimization
+panic = "abort"    # Abort on panic
+strip = true       # Strip symbols from binary

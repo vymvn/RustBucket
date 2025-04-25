@@ -72,7 +72,7 @@ impl CommandRegistry {
         registry.register(Box::new(server_cmds::ServerSessionsCommand {}));
         // registry.register(Box::new(ServerSessionsCommand {}));
         registry.register(Box::new(server_cmds::ServerHelpCommand {}));
-
+        registry.register(Box::new(server_cmds::PayloadCommand {}));
         // Register built-in implant commands
         registry.register(Box::new(implant_cmds::ImplantLsCommand {}));
         registry.register(Box::new(implant_cmds::ImplantSysteminfoCommand {}));

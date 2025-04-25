@@ -5,6 +5,8 @@ mod sessions;
 // mod ping;
 // Add more command modules here
 
+mod payload_command;
+pub use payload_command::PayloadCommand;
 // pub use help::HelpCommand;
 pub use help::ServerHelpCommand;
 pub use listeners::ServerListenersCommand;
