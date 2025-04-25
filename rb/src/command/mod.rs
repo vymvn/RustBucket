@@ -1,6 +1,6 @@
 use crate::listener::http_listener::HttpListener;
 use crate::listener::*;
-use crate::message::{CommandError, CommandOutput, CommandRequest, CommandResult};
+use crate::message::{CommandError, CommandRequest, CommandResult};
 use crate::session::SessionManager;
 use std::any::Any;
 use std::collections::HashMap;

