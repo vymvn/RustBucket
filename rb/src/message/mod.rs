@@ -60,6 +60,9 @@ pub enum CommandError {
 
     #[error("Internal error: {0}")]
     Internal(String),
+
+    #[error("Timeout: {0}")]
+    Timeout(String),
 }
 
 // implant data structures
