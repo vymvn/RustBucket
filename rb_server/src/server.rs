@@ -48,6 +48,10 @@ impl RbServer {
             command_registry: Arc::new(CommandRegistry::new()),
         }
     }
+     pub fn session_manager(&self) -> Arc<RwLock<SessionManager>> {
+          self.session_manager.clone()
+    }
+    
 
     /// Start the C2 server
     pub async fn start(&self) -> io::Result<()> {
