@@ -8,6 +8,7 @@ use std::error::Error;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy)]
+pub enum TransportProtocol {
     Http,
     Https,
     Dns,
