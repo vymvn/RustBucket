@@ -1,16 +1,15 @@
 use crate::listener::http_listener::HttpListener;
+use crate::listener::*;
 use crate::message::{CommandError, CommandOutput, CommandRequest, CommandResult};
 use crate::session::SessionManager;
-use crate::listener::*;
 use std::any::Any;
 use std::collections::HashMap;
 use std::result::Result;
 use std::sync::Arc;
 use std::sync::{Mutex, RwLock};
 use uuid::Uuid;
-use tokio::time::sleep;
+
 use clap;
-use tokio::time::Duration;
 
 mod implant_cmds;
 mod server_cmds;
@@ -80,7 +79,6 @@ impl CommandRegistry {
 
         registry
     }
-
 
     pub fn register(&mut self, command: Box<dyn RbCommand>) {
         match command.command_type() {
@@ -194,7 +192,6 @@ impl CommandRegistry {
         }
     }
 
-<<<<<<< HEAD
     async fn execute_implant_command(
         &self,
         command: &Box<dyn RbCommand>,
@@ -250,61 +247,9 @@ impl CommandRegistry {
                 }
             }
             Err(err) => Err(CommandError::InvalidArguments(format!(
-=======
-   async fn execute_implant_command(
-    &self,
-    command: &Box<dyn RbCommand>,
-    context: &mut CommandContext,
-    command_line: &str,
-    session_id: usize,
-) -> CommandResult {
-    // 1) Parse arguments
-    let parsed_args = match command.parse_args(command_line) {
-        Ok(args) => args,
-        Err(err) => {
-            return Err(CommandError::InvalidArguments(format!(
->>>>>>> 654ec29 (implant not really working :sob:)
                 "Failed to parse arguments: {}",
                 err
-            )))
+            ))),
         }
-    };
-
-    // 2) Lookup the session
-    let session = {
-        let mgr = context.session_manager.read().unwrap();
-        match mgr.get_session(&session_id) {
-            Some(s) => s,
-            None => {
-                return Err(CommandError::TargetNotFound(format!(
-                    "Session '{}' not found",
-                    session_id
-                )))
-            }
-        }
-    };
-
-    // 3) Schedule the command on the implant
-    let task_id = session
-        .create_task(command_line.to_string())
-        .map_err(|e| CommandError::TargetNotFound(format!("Failed to create task: {}", e)))?;
-
-    // 4) Wait for the implant to post back its result
-    let result = loop {
-        if let Some(sess) = context.session_manager.read().unwrap().get_session(&session_id) {
-            if let Ok(res) = sess.get_task_result(&task_id) {
-                break res;
-            }
-        } else {
-            return Err(CommandError::TargetNotFound(format!(
-                "Session '{}' disappeared",
-                session_id
-            )));
-        }
-        sleep(Duration::from_millis(200));
-    };
-
-    // 5) Return the stdout as the command output
-    Ok(CommandOutput::Text(result.output))
- }
+    }
 }

@@ -24,7 +24,6 @@ pub struct HttpListener {
     name: String,
     id: Uuid,
     addr: SocketAddr,
-    // sessions: Arc<RwLock<HashMap<Uuid, Arc<Session>>>>,
     session_manager: Arc<RwLock<SessionManager>>,
     running: Arc<AtomicBool>,
     shutdown_tx: Option<oneshot::Sender<()>>,
@@ -44,8 +43,6 @@ impl HttpListener {
             handle: None,
             state: Arc::new(ServerState {
                 implants: Arc::new(Mutex::new(HashMap::new())),
-                // tasks: Arc::new(Mutex::new(HashMap::new())),
-                // results: Arc::new(Mutex::new(HashMap::new())),
             }),
         }
     }
@@ -264,7 +261,7 @@ impl HttpListener {
                         .route("/checkin", web::post().to(implant_checkin))
                         .route("/tasks/{implant_id}", web::get().to(get_tasks))
                         .route("/results", web::post().to(upload_results))
-                    //    .route("/tasks", web::post().to(create_task))
+                        //    .route("/tasks", web::post().to(create_task))
                         .route("/implants", web::get().to(list_implants))
                 })
                 .bind(server_addr)

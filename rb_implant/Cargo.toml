@@ -20,3 +20,5 @@ uuid = { version = "1.2", features = ["serde", "v4"] }
 
 # System/user info
 whoami = "1.2"
+
+rb = { path = "../rb" }
