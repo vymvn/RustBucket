@@ -1,9 +1,0 @@
-
-[package]
-name = "rb_payload"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-rb_implant = { path = "../rb_implant" }
-tokio = { version = "1", features = ["full"] }

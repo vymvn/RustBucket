@@ -220,12 +220,12 @@ impl CommandRegistry {
                     }
                 };
 
-                let test_args = match parsed_args.downcast::<Vec<String>>() {
-                    Ok(args) => *args,
-                    Err(_) => return Err(CommandError::Internal("Invalid arguments type".into())),
-                };
+                // let test_args = match parsed_args.downcast::<Vec<String>>() {
+                //     Ok(args) => *args,
+                //     Err(_) => return Err(CommandError::Internal("Invalid arguments type".into())),
+                // };
 
-                dbg!(&test_args);
+                // dbg!(&test_args);
 
                 let args = Vec::<String>::new();
 
