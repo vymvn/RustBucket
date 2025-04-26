@@ -1,5 +1,6 @@
 use crate::certs::{CrlUpdater, TestPki};
 use crate::config::RbServerConfig;
+use dashmap::DashMap;
 use futures::{SinkExt, StreamExt};
 use rb::client::Client;
 use rb::command::CommandContext;
@@ -14,7 +15,6 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use uuid::Uuid;
-use dashmap::DashMap;
 
 use rb::command::CommandRegistry;
 use rb::message::{CommandRequest, CommandResult};
@@ -52,10 +52,9 @@ impl RbServer {
             command_registry: Arc::new(CommandRegistry::new()),
         }
     }
-     pub fn session_manager(&self) -> Arc<RwLock<SessionManager>> {
-          self.session_manager.clone()
-    }
-    
+    // pub fn session_manager(&self) -> Arc<RwLock<SessionManager>> {
+    //     self.session_manager.clone()
+    // }
 
     /// Start the C2 server
     pub async fn start(&self) -> io::Result<()> {
@@ -94,8 +93,10 @@ impl RbServer {
             while running.load(Ordering::SeqCst) {
                 match tokio::time::timeout(
                     std::time::Duration::from_secs(1), // Check running flag every second
-                    listener.accept()
-                ).await {
+                    listener.accept(),
+                )
+                .await
+                {
                     Ok(Ok((socket, addr))) => {
                         log::info!("New connection from: {}", addr);
 
@@ -307,7 +308,6 @@ impl RbServer {
         Ok(())
     }
 
-    /// Stop the C2 server
     async fn handle_client(
         mut client: Client,
         client_id: Uuid,
@@ -444,10 +444,10 @@ impl RbServer {
             let mut handlers = self.client_handlers.lock().unwrap();
             let handler_count = handlers.len();
             log::info!("Waiting for {} client handlers to complete", handler_count);
-            
+
             let mut completed = 0;
             let mut timed_out = 0;
-            
+
             for handle in handlers.drain(..) {
                 match tokio::time::timeout(std::time::Duration::from_secs(2), handle).await {
                     Ok(_) => completed += 1,
@@ -457,8 +457,12 @@ impl RbServer {
                     }
                 }
             }
-            
-            log::info!("Client handlers: {} completed, {} timed out", completed, timed_out);
+
+            log::info!(
+                "Client handlers: {} completed, {} timed out",
+                completed,
+                timed_out
+            );
         }
 
         // Clean up any remaining clients

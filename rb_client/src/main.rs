@@ -14,12 +14,11 @@ use rb::message::{CommandError, CommandOutput, CommandRequest};
 
 mod utils;
 
-
 // Custom prompt implementation with the requested name
 struct RustBucketPrompt {
     // Current session ID if we're interacting with a session
     active_session: Option<usize>,
-    // Info about the active session (could be expanded)
+    // Info about the active session
     session_info: Option<String>,
 }
 
@@ -49,11 +48,19 @@ impl Prompt for RustBucketPrompt {
         match (self.active_session, &self.session_info) {
             (Some(id), Some(info)) => {
                 // Session-specific prompt with session info
-                Cow::Owned(format!("{}[{}]> ", "Session".cyan().bold(), info.bright_cyan()))
+                Cow::Owned(format!(
+                    "{}[{}]> ",
+                    "Session".cyan().bold(),
+                    info.bright_cyan()
+                ))
             }
             (Some(id), None) => {
                 // Session-specific prompt with just ID
-                Cow::Owned(format!("{}[{}]> ", "Session".cyan().bold(), id.to_string().bright_cyan()))
+                Cow::Owned(format!(
+                    "{}[{}]> ",
+                    "Session".cyan().bold(),
+                    id.to_string().bright_cyan()
+                ))
             }
             _ => {
                 // Default prompt
@@ -355,11 +362,15 @@ fn main() -> io::Result<()> {
                     if let Ok(session_id) = parts[2].parse::<usize>() {
                         // Update active session
                         active_session = Some(session_id);
-                        
+
                         // Update prompt
                         prompt.set_session(session_id, format!("Session {}", session_id));
-                        
-                        println!("{} {}", "Interacting with session".green(), session_id.to_string().bright_green());
+
+                        println!(
+                            "{} {}",
+                            "Interacting with session".green(),
+                            session_id.to_string().bright_green()
+                        );
                         continue;
                     } else {
                         eprintln!("{}", "Invalid session ID".bright_red());
@@ -441,7 +452,9 @@ fn main() -> io::Result<()> {
                     response_data.extend_from_slice(&buffer[..n]);
 
                     // Try to parse what we have so far to see if it's complete
-                    if let Ok(response) = serde_json::from_slice::<utils::ServerResponse>(&response_data) {
+                    if let Ok(response) =
+                        serde_json::from_slice::<utils::ServerResponse>(&response_data)
+                    {
                         // We have a complete response
                         match response {
                             utils::ServerResponse::Success(output) => {
@@ -449,9 +462,11 @@ fn main() -> io::Result<()> {
                             }
                             utils::ServerResponse::Error(error) => {
                                 utils::display_command_error(&error);
-                                
+
                                 // If we got a session error and we're in session mode, exit it
-                                if let CommandError::SessionError(_) | CommandError::NoActiveSession(_) = error {
+                                if let CommandError::SessionError(_)
+                                | CommandError::NoActiveSession(_) = error
+                                {
                                     if active_session.is_some() {
                                         active_session = None;
                                         prompt.clear_session();
@@ -490,7 +505,6 @@ fn main() -> io::Result<()> {
                 } else {
                     println!("{}", "Continuing...".green());
                 }
-
             }
         }
     }

@@ -1,4 +1,3 @@
-mod agent;
 mod certs;
 mod config;
 // mod context;
@@ -11,7 +10,10 @@ use tokio::signal;
 #[tokio::main]
 async fn main() {
     // Initialize the logger
-    simple_logger::SimpleLogger::new().with_level(log::LevelFilter::Info).init().unwrap();
+    simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Info)
+        .init()
+        .unwrap();
 
     // Create mTLS configuration
     let mtls_config = config::MtlsConfig::new(
@@ -24,7 +26,7 @@ async fn main() {
     );
 
     // Create server with mTLS enabled
-    let conf = config::RbServerConfig::with_mtls("localhost".to_string(), 6666, false, mtls_config);
+    let conf = config::RbServerConfig::with_mtls("0.0.0.0".to_string(), 6666, false, mtls_config);
     // let conf = config::RbServerConfig::new("localhost".to_string(), 6666, false);
     let c2 = server::RbServer::new(conf);
 
