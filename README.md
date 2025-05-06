@@ -7,6 +7,10 @@ This is basically learning project for me and my team, to learn Rust and how C2 
 
 # Requirements
 
+## Rust
+
+Follow [the official instructions](https://www.rust-lang.org/tools/install) to install Rust.
+
 ## Mingw
 
 Mingw is needed to cross compile the windows payload. You can install it using your package manager.
