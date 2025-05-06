@@ -5,16 +5,6 @@ A simple C2 framework written in Rust.
 
 This is basically learning project for me and my team, to learn Rust and how C2 frameworks work. It is in no way a finished project that's ready for a production environment.
 
-# TODO
-
-- Cleaner state management (and cleaner code in general).
-- Implement actual commands to do stuff instead of just powershell commands.
-- Nicer cli experience (tab completion, syntax highlighting, etc).
-- A DB to save server state.
-- Config file for server.
-- Operator profiles and a command to generate them.
-- Make server send the generated payload to the client (currently it just stays on the server).
-
 # Requirements
 
 ## Mingw
@@ -91,3 +81,12 @@ Runs the server on default port 6666. This can be customized later when we add c
 This will connect to the default server on localhost:6666. You can change the connection details with command line flags. Run `./rb_client --help` for more details.
 
 
+# TODO
+
+- Cleaner state management (and cleaner code in general).
+- Implement actual commands to do stuff instead of just powershell commands.
+- Nicer cli experience (tab completion, syntax highlighting, etc).
+- A DB to save server state.
+- Config file for server.
+- Operator profiles and a command to generate them.
+- Make server send the generated payload to the client (currently it just stays on the server).
